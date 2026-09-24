@@ -1,6 +1,42 @@
 import { Router, Request, Response } from 'express';
 import os from 'os';
+import fs from 'fs';
 import bcrypt from 'bcryptjs';
+
+/**
+ * Helper to detect container instance memory limit (cgroups v1/v2 or MEMORY_LIMIT env)
+ * instead of un-isolated host node memory.
+ */
+function getContainerMemoryLimitMb(): number {
+  try {
+    if (process.env.MEMORY_LIMIT) {
+      const parsed = parseInt(process.env.MEMORY_LIMIT, 10);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+    if (fs.existsSync('/sys/fs/cgroup/memory.max')) {
+      const val = fs.readFileSync('/sys/fs/cgroup/memory.max', 'utf8').trim();
+      if (val !== 'max') {
+        const bytes = parseInt(val, 10);
+        if (!isNaN(bytes) && bytes > 0 && bytes < os.totalmem()) {
+          return Math.round(bytes / 1024 / 1024);
+        }
+      }
+    }
+    if (fs.existsSync('/sys/fs/cgroup/memory/memory.limit_in_bytes')) {
+      const val = fs.readFileSync('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'utf8').trim();
+      const bytes = parseInt(val, 10);
+      if (!isNaN(bytes) && bytes > 0 && bytes < os.totalmem()) {
+        return Math.round(bytes / 1024 / 1024);
+      }
+    }
+  } catch {
+    // Fallback if permission error
+  }
+
+  const totalHostMb = Math.round(os.totalmem() / 1024 / 1024);
+  // Default to 512MB container limit if physical host is a large multi-tenant node
+  return totalHostMb > 4096 ? 512 : totalHostMb;
+}
 import jwt from 'jsonwebtoken';
 import { UserModel } from '../models/User.js';
 import { EndpointModel } from '../models/Endpoint.js';
@@ -662,10 +698,10 @@ router.get('/diagnostics', authenticateToken, requireAdmin, async (_req: AuthReq
     const loadAvg = os.loadavg();
     const cpuLoad1Min = Math.min(100, Math.round(((loadAvg[0] || 0) / cpuCoresCount) * 100));
 
-    const totalSystemRamMb = Math.round(os.totalmem() / 1024 / 1024);
-    const freeSystemRamMb = Math.round(os.freemem() / 1024 / 1024);
-    const usedSystemRamMb = totalSystemRamMb - freeSystemRamMb;
-    const systemRamUsagePercent = Math.round((usedSystemRamMb / totalSystemRamMb) * 100);
+    const totalSystemRamMb = getContainerMemoryLimitMb();
+    const usedSystemRamMb = Math.round(mem.rss / 1024 / 1024);
+    const freeSystemRamMb = Math.max(0, totalSystemRamMb - usedSystemRamMb);
+    const systemRamUsagePercent = Math.min(100, Math.round((usedSystemRamMb / totalSystemRamMb) * 100));
 
     const processCpu = process.cpuUsage();
     const processCpuTimeMs = Math.round((processCpu.user + processCpu.system) / 1000);
