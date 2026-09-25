@@ -801,6 +801,15 @@ export default function WorkflowDetailPage() {
     if (workflowId) {
       loadWorkflow();
     }
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      if (searchParams.get('github_app_connected') === 'true') {
+        setIsGithubModalOpen(true);
+        loadPastRuns();
+        loadRawWebhookLogs();
+        loadGithubAppConfig();
+      }
+    }
   }, [workflowId]);
 
   // Connect to Socket.IO backend for live telemetry streaming
@@ -3052,10 +3061,13 @@ export default function WorkflowDetailPage() {
                             />
                           </div>
 
-                          <div className="space-y-1">
-                            <label className="text-[10px] text-neutral-300 uppercase font-bold block">
-                              Target Branch
-                            </label>
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] text-neutral-300 uppercase font-bold block">
+                                Target Branch
+                              </label>
+                              <span className="text-[10px] text-purple-300 font-mono">QUICK SELECT</span>
+                            </div>
                             <input
                               type="text"
                               value={githubBranch}
@@ -3063,7 +3075,41 @@ export default function WorkflowDetailPage() {
                               placeholder="main"
                               className="w-full px-3 py-2 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
                             />
+                            {/* Branch Selection Pills */}
+                            <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+                              {['main', 'master', 'dev', 'staging'].map((b) => (
+                                <button
+                                  key={b}
+                                  type="button"
+                                  onClick={() => setGithubBranch(b)}
+                                  className={`px-2 py-0.5 text-[10px] rounded font-mono border-none cursor-pointer transition-all ${
+                                    githubBranch === b
+                                      ? 'bg-purple-600 text-white font-bold'
+                                      : 'bg-neutral-800 hover:bg-neutral-750 text-neutral-400'
+                                  }`}
+                                >
+                                  {b}
+                                </button>
+                              ))}
+                            </div>
                           </div>
+
+                          {/* Quick Scan Endpoints from Connected Repo */}
+                          {githubRepo && (
+                            <div className="pt-2 border-t border-neutral-850">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsGithubModalOpen(false);
+                                  handleOpenScanner();
+                                }}
+                                className="w-full py-2 bg-gradient-to-r from-rose-600 to-purple-600 hover:from-rose-500 hover:to-purple-500 text-white font-bold text-xs rounded-lg border-none cursor-pointer flex items-center justify-center gap-1.5 shadow-lg"
+                              >
+                                <Sparkles className="w-3.5 h-3.5" />
+                                <span>⚡ Scan & Auto-Import Endpoints from {githubRepo}</span>
+                              </button>
+                            </div>
+                          )}
 
                           <div className="space-y-1">
                             <label className="text-[10px] text-rose-300 uppercase font-bold block flex items-center gap-1">
