@@ -873,14 +873,19 @@ export default function WorkflowDetailPage() {
     }
   };
 
+  const [githubInstallationIdInput, setGithubInstallationIdInput] = useState<string>('');
+
   const handleSaveGithubSettings = async () => {
     if (!workflow) return;
     try {
       setSaving(true);
+      const finalInstallationId = (githubInstallationIdInput || workflow.githubInstallationId || '').trim();
       const res = await updateWorkflow(workflow._id, {
         githubEnabled,
         githubRepo,
         githubBranch,
+        githubInstallationId: finalInstallationId,
+        githubAppConnected: Boolean(finalInstallationId) || workflow.githubAppConnected,
         notificationEmail,
       });
       setWorkflow(res.workflow);
@@ -2892,12 +2897,35 @@ export default function WorkflowDetailPage() {
                           </a>
                         )}
                       </div>
-                      {workflow?.githubInstallationId && (
+                      {workflow?.githubInstallationId || workflow?.githubAppConnected ? (
                         <div className="text-[10px] font-mono text-purple-300 bg-black/60 p-2.5 rounded-lg flex items-center justify-between">
-                          <span>INSTALLATION ID: {workflow.githubInstallationId}</span>
+                          <span>INSTALLATION ID: {workflow.githubInstallationId || githubInstallationIdInput}</span>
                           <span className="text-emerald-400 font-bold flex items-center gap-1">
                             <Check className="w-3 h-3" /> AUTOMATIC PUSH TRACKING ACTIVE
                           </span>
+                        </div>
+                      ) : (
+                        <div className="pt-2 border-t border-purple-900/30 space-y-1.5">
+                          <label className="text-[10px] text-neutral-400 font-bold uppercase block">
+                            Or Bind Existing Installation ID from GitHub URL:
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={githubInstallationIdInput}
+                              onChange={(e) => setGithubInstallationIdInput(e.target.value)}
+                              placeholder="e.g. 69201948 (from github.com/settings/installations/...)"
+                              className="flex-1 px-3 py-1.5 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleSaveGithubSettings}
+                              disabled={!githubInstallationIdInput.trim()}
+                              className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-lg border-none cursor-pointer disabled:opacity-50"
+                            >
+                              Bind ID
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
