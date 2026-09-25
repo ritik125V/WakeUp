@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import axios from 'axios';
 import { WorkflowModel } from '../models/Workflow';
+import { WorkflowRunModel } from '../models/WorkflowRun';
 import { authenticateToken, AuthRequest } from '../middleware/authMiddleware';
 import { runWorkflowExecution, executeSingleStepTest } from '../services/workflowRunner';
 import { scanGithubRepositoryEndpoints, listGithubRepoFiles } from '../services/codeEndpointScanner';
@@ -520,6 +521,92 @@ router.post('/:id/import-scanned-steps', authenticateToken, async (req: AuthRequ
   } catch (error: any) {
     console.error('Error importing scanned steps:', error?.message);
     res.status(500).json({ error: error.message || 'Failed to import scanned steps' });
+  }
+});
+/**
+ * Persist client-side / browser-direct execution report to DB
+ */
+router.post('/:id/runs', async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { summary, stepLogs, triggerSource, commitInfo, githubRepo, githubBranch } = req.body;
+
+    const workflow = await WorkflowModel.findById(id);
+    if (!workflow) {
+      return res.status(404).json({ error: 'Workflow not found' });
+    }
+
+    const runDoc = await WorkflowRunModel.create({
+      workflowId: workflow._id,
+      userId: workflow.userId || 'guest-user',
+      workflowName: workflow.name,
+      triggerSource: triggerSource || 'browser_direct',
+      githubRepo: githubRepo || workflow.githubRepo || '',
+      githubBranch: githubBranch || workflow.githubBranch || 'main',
+      commitInfo: commitInfo || {},
+      summary: summary || {
+        totalSteps: workflow.steps.length,
+        successSteps: stepLogs ? stepLogs.filter((s: any) => s.status === 'success').length : 0,
+        failedSteps: stepLogs ? stepLogs.filter((s: any) => s.status === 'failed' || s.status === 'error').length : 0,
+        totalTimeMs: 0,
+        overallStatus: 'success',
+        startedAt: new Date(),
+        finishedAt: new Date(),
+      },
+      stepLogs: stepLogs || [],
+    });
+
+    await WorkflowModel.updateOne(
+      { _id: id },
+      {
+        $set: {
+          lastRunStatus: runDoc.summary.overallStatus,
+          lastTriggeredAt: new Date(),
+        },
+      }
+    );
+
+    res.status(201).json({ message: 'Execution run report saved successfully', run: runDoc });
+  } catch (error: any) {
+    console.error('Error saving workflow run report:', error?.message);
+    res.status(500).json({ error: 'Failed to save workflow run report' });
+  }
+});
+
+/**
+ * Fetch execution run history for a workflow
+ */
+router.get('/:id/runs', async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const limit = parseInt(req.query.limit as string) || 20;
+
+    const runs = await WorkflowRunModel.find({ workflowId: id })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    res.json({ runs, count: runs.length });
+  } catch (error: any) {
+    console.error('Error fetching workflow run history:', error?.message);
+    res.status(500).json({ error: 'Failed to fetch workflow run history' });
+  }
+});
+
+/**
+ * Fetch details of a specific execution run report
+ */
+router.get('/runs/:runId', async (req: Request, res: Response) => {
+  try {
+    const { runId } = req.params;
+    const run = await WorkflowRunModel.findById(runId).lean();
+    if (!run) {
+      return res.status(404).json({ error: 'Workflow run report not found' });
+    }
+    res.json({ run });
+  } catch (error: any) {
+    console.error('Error fetching workflow run details:', error?.message);
+    res.status(500).json({ error: 'Failed to fetch workflow run details' });
   }
 });
 

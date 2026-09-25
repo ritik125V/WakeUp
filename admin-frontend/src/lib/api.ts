@@ -280,3 +280,46 @@ export async function fetchAdminDiagnostics() {
   const res = await adminApiClient.get<{ diagnostics: SystemDiagnostics }>('/admin/diagnostics');
   return res.data;
 }
+
+export interface AdminWorkflowRunRecord {
+  _id: string;
+  workflowId: string;
+  userId: string;
+  workflowName: string;
+  triggerSource: 'github_commit' | 'manual' | 'browser_direct' | 'api';
+  githubRepo?: string;
+  githubBranch?: string;
+  commitInfo?: {
+    commitMsg?: string;
+    author?: string;
+    authorEmail?: string;
+    commitHash?: string;
+    repo?: string;
+    branch?: string;
+  };
+  summary: {
+    totalSteps: number;
+    successSteps: number;
+    failedSteps: number;
+    totalTimeMs: number;
+    overallStatus: 'success' | 'failed';
+    startedAt: string;
+    finishedAt: string;
+  };
+  stepLogs: any[];
+  owner?: { email: string; name: string };
+  createdAt: string;
+}
+
+export async function fetchAdminWorkflowRuns(params?: { status?: string; repo?: string; search?: string; limit?: number }) {
+  const query = new URLSearchParams();
+  if (params?.status) query.append('status', params.status);
+  if (params?.repo) query.append('repo', params.repo);
+  if (params?.search) query.append('search', params.search);
+  if (params?.limit) query.append('limit', String(params.limit));
+
+  const res = await adminApiClient.get<{ runs: AdminWorkflowRunRecord[]; count: number }>(
+    `/admin/workflow-runs?${query.toString()}`
+  );
+  return res.data;
+}

@@ -715,7 +715,7 @@ export async function executeWorkflowInBrowser(
   const finishedAt = new Date().toISOString();
   const totalTimeMs = Date.now() - startTime;
 
-  return {
+  const resSummary = {
     workflowName: workflow.name,
     startedAt: new Date(startTime).toISOString(),
     finishedAt,
@@ -726,7 +726,47 @@ export async function executeWorkflowInBrowser(
     overallStatus,
     steps: stepLogs,
   };
+
+  // Automatically persist browser-direct execution report to MongoDB
+  try {
+    await saveWorkflowRunReport(workflow._id, {
+      summary: resSummary,
+      stepLogs,
+      triggerSource: 'browser_direct',
+      githubRepo: workflow.githubRepo,
+      githubBranch: workflow.githubBranch,
+    });
+  } catch (err) {
+    console.error('Failed to auto-save browser direct execution run report:', err);
+  }
+
+  return resSummary;
 }
+
+export const saveWorkflowRunReport = async (
+  workflowId: string,
+  data: {
+    summary?: any;
+    stepLogs?: any[];
+    triggerSource?: string;
+    commitInfo?: any;
+    githubRepo?: string;
+    githubBranch?: string;
+  }
+) => {
+  const response = await apiClient.post(`/workflows/${workflowId}/runs`, data);
+  return response.data;
+};
+
+export const fetchWorkflowRunHistory = async (workflowId: string, limit = 20) => {
+  const response = await apiClient.get<{ runs: any[]; count: number }>(`/workflows/${workflowId}/runs?limit=${limit}`);
+  return response.data;
+};
+
+export const fetchWorkflowRunDetails = async (runId: string) => {
+  const response = await apiClient.get<{ run: any }>(`/workflows/runs/${runId}`);
+  return response.data;
+};
 
 export interface IScannedEndpoint {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';

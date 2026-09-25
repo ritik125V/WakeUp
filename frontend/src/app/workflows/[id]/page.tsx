@@ -55,6 +55,8 @@ import {
   Upload,
   FolderPlus,
   Laptop,
+  History,
+  GitCommit,
 } from 'lucide-react';
 import { extractEndpointsFromCode } from '@/lib/codeParser';
 import {
@@ -67,6 +69,7 @@ import {
   fetchGithubRepoFiles,
   scanGithubRepoEndpoints,
   importScannedEndpointsToWorkflow,
+  fetchWorkflowRunHistory,
   IScannedEndpoint,
   IGithubRepoItem,
   WorkflowData,
@@ -305,8 +308,8 @@ export default function WorkflowDetailPage() {
   const [activeTab, setActiveTab] = useState<'params' | 'headers' | 'body' | 'cookies' | 'variables'>('body');
 
   // Top Navigation Dropdown States
-  const [isTriggersMenuOpen, setIsTriggersMenuOpen] = useState<boolean>(false);
-  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState<boolean>(false);
+  const [isConfigsMenuOpen, setIsConfigsMenuOpen] = useState<boolean>(false);
+  const [isIntegrationsMenuOpen, setIsIntegrationsMenuOpen] = useState<boolean>(false);
 
   // Pre-Flight, Guide & Auth Modal state
   const [isPreflightOpen, setIsPreflightOpen] = useState<boolean>(false);
@@ -319,8 +322,9 @@ export default function WorkflowDetailPage() {
   const [isSingleTesting, setIsSingleTesting] = useState<boolean>(false);
   const [singleTestResult, setSingleTestResult] = useState<IStepTelemetryForPDF | null>(null);
 
-  // GitHub Webhook Auto-Trigger State
+  // GitHub Webhook Auto-Trigger & Control Center State
   const [isGithubModalOpen, setIsGithubModalOpen] = useState<boolean>(false);
+  const [githubModalTab, setGithubModalTab] = useState<'config' | 'simulation' | 'scanner' | 'history'>('config');
   const [githubEnabled, setGithubEnabled] = useState<boolean>(false);
   const [githubRepo, setGithubRepo] = useState<string>('');
   const [githubBranch, setGithubBranch] = useState<string>('main');
@@ -364,6 +368,28 @@ export default function WorkflowDetailPage() {
   // Bulk Base URL Override State (Frontend Only)
   const [globalBaseUrl, setGlobalBaseUrl] = useState<string>('http://localhost:5000');
   const [isBaseUrlPopoverOpen, setIsBaseUrlPopoverOpen] = useState<boolean>(false);
+
+  // Run History Drawer State
+  const [isRunHistoryOpen, setIsRunHistoryOpen] = useState<boolean>(false);
+  const [pastRuns, setPastRuns] = useState<any[]>([]);
+  const [loadingPastRuns, setLoadingPastRuns] = useState<boolean>(false);
+
+  const loadPastRuns = async () => {
+    try {
+      setLoadingPastRuns(true);
+      const res = await fetchWorkflowRunHistory(workflowId, 30);
+      setPastRuns(res.runs || []);
+    } catch (err) {
+      console.error('Failed to load workflow run history:', err);
+    } finally {
+      setLoadingPastRuns(false);
+    }
+  };
+
+  const handleOpenHistory = () => {
+    setIsRunHistoryOpen(true);
+    loadPastRuns();
+  };
 
   const handleLocalFilesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -823,6 +849,11 @@ export default function WorkflowDetailPage() {
     }
   };
 
+  const handleOpenGithubModal = () => {
+    setIsGithubModalOpen(true);
+    loadPastRuns();
+  };
+
   const handleSimulateGitPush = async () => {
     if (!workflow) return;
     try {
@@ -1124,38 +1155,25 @@ export default function WorkflowDetailPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Prominent Direct AI Agent Spec Import Button */}
-          <button
-            onClick={() => setIsAiSpecModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-950/80 hover:bg-rose-900 text-rose-300 text-xs font-bold rounded-lg border border-rose-500/30 transition-all cursor-pointer shadow-md"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-rose-400" />
-            <span>AI Agent Import (.md)</span>
-          </button>
-
-          {/* Dropdown 1: Code & Triggers */}
+          {/* Dropdown 1: Configs & Imports */}
           <div className="relative">
             <button
+              type="button"
               onClick={() => {
-                setIsTriggersMenuOpen(!isTriggersMenuOpen);
-                setIsToolsMenuOpen(false);
+                setIsConfigsMenuOpen(!isConfigsMenuOpen);
+                setIsIntegrationsMenuOpen(false);
               }}
-              className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-bold rounded-lg border-none transition-colors cursor-pointer ${
-                workflow?.githubEnabled
-                  ? 'bg-emerald-950 text-emerald-300 hover:bg-emerald-900'
-                  : 'bg-neutral-900 hover:bg-neutral-850 text-neutral-200'
-              }`}
+              className="inline-flex items-center gap-2 px-3 py-2 bg-neutral-900 hover:bg-neutral-850 text-neutral-200 text-xs font-bold rounded-lg border-none transition-colors cursor-pointer"
             >
-              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-              <span>Triggers & Scanner</span>
-              {workflow?.githubEnabled && <span className="w-2 h-2 rounded-full bg-emerald-400" />}
-              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isTriggersMenuOpen ? 'rotate-180' : ''}`} />
+              <Settings className="w-3.5 h-3.5 text-purple-400" />
+              <span>Configs & Imports</span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isConfigsMenuOpen ? 'rotate-180' : ''}`} />
             </button>
 
             <AnimatePresence>
-              {isTriggersMenuOpen && (
+              {isConfigsMenuOpen && (
                 <>
-                  <div className="fixed inset-0 z-20" onClick={() => setIsTriggersMenuOpen(false)} />
+                  <div className="fixed inset-0 z-20" onClick={() => setIsConfigsMenuOpen(false)} />
                   <motion.div
                     initial={{ opacity: 0, y: 8, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -1164,8 +1182,26 @@ export default function WorkflowDetailPage() {
                     className="absolute right-0 mt-2 w-64 bg-neutral-900 rounded-xl p-1.5 shadow-2xl z-30 font-mono text-xs space-y-1 border-none"
                   >
                     <button
+                      type="button"
                       onClick={() => {
-                        setIsTriggersMenuOpen(false);
+                        setIsConfigsMenuOpen(false);
+                        setIsBaseUrlPopoverOpen(true);
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-purple-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                    >
+                      <Globe className="w-4 h-4 text-purple-400 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs text-white font-bold flex items-center justify-between">
+                          <span>Bulk Base URL Override</span>
+                        </div>
+                        <div className="text-[10px] text-neutral-400 font-normal">Change target host/port across all steps</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsConfigsMenuOpen(false);
                         setIsAiSpecModalOpen(true);
                       }}
                       className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-rose-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
@@ -1173,18 +1209,19 @@ export default function WorkflowDetailPage() {
                       <Sparkles className="w-4 h-4 text-rose-400 shrink-0" />
                       <div>
                         <div className="text-xs text-white font-bold">Import via AI Agent (.md)</div>
-                        <div className="text-[10px] text-neutral-400 font-normal">Generate steps from local AI spec</div>
+                        <div className="text-[10px] text-neutral-400 font-normal">Generate steps from markdown spec file</div>
                       </div>
                     </button>
 
                     <button
+                      type="button"
                       onClick={() => {
-                        setIsTriggersMenuOpen(false);
+                        setIsConfigsMenuOpen(false);
                         handleOpenScanner();
                       }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-purple-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-cyan-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
                     >
-                      <Code className="w-4 h-4 text-purple-400 shrink-0" />
+                      <Code className="w-4 h-4 text-cyan-400 shrink-0" />
                       <div>
                         <div className="text-xs text-white font-bold">Scan Code Endpoints</div>
                         <div className="text-[10px] text-neutral-400 font-normal">Extract routes from GitHub or local files</div>
@@ -1192,25 +1229,9 @@ export default function WorkflowDetailPage() {
                     </button>
 
                     <button
+                      type="button"
                       onClick={() => {
-                        setIsTriggersMenuOpen(false);
-                        setIsGithubModalOpen(true);
-                      }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-emerald-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
-                    >
-                      <GitBranch className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <div>
-                        <div className="text-xs text-white font-bold flex items-center gap-1.5">
-                          GitHub Push Trigger
-                          {workflow?.githubEnabled && <span className="text-[9px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-400 rounded font-mono">ACTIVE</span>}
-                        </div>
-                        <div className="text-[10px] text-neutral-400 font-normal">Auto-run workflow on git push</div>
-                      </div>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setIsTriggersMenuOpen(false);
+                        setIsConfigsMenuOpen(false);
                         setIsAuthModalOpen(true);
                       }}
                       className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-amber-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
@@ -1218,7 +1239,22 @@ export default function WorkflowDetailPage() {
                       <Key className="w-4 h-4 text-amber-400 shrink-0" />
                       <div>
                         <div className="text-xs text-white font-bold">Auth Step Presets</div>
-                        <div className="text-[10px] text-neutral-400 font-normal">Insert OAuth / Bearer / OPA steps</div>
+                        <div className="text-[10px] text-neutral-400 font-normal">Insert OAuth / Bearer / JWT auth steps</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsConfigsMenuOpen(false);
+                        handleExportWorkflowJSON();
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-emerald-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                    >
+                      <Download className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <div>
+                        <div className="text-xs text-white font-bold">Export Workflow JSON</div>
+                        <div className="text-[10px] text-neutral-400 font-normal">Download workflow backup JSON file</div>
                       </div>
                     </button>
                   </motion.div>
@@ -1227,70 +1263,101 @@ export default function WorkflowDetailPage() {
             </AnimatePresence>
           </div>
 
-          {/* Dropdown 2: Tools & Reports */}
+          {/* Dropdown 2: Integrations & Reports */}
           <div className="relative">
             <button
+              type="button"
               onClick={() => {
-                setIsToolsMenuOpen(!isToolsMenuOpen);
-                setIsTriggersMenuOpen(false);
+                setIsIntegrationsMenuOpen(!isIntegrationsMenuOpen);
+                setIsConfigsMenuOpen(false);
               }}
-              className="inline-flex items-center gap-2 px-3 py-2 bg-neutral-900 hover:bg-neutral-850 text-neutral-200 text-xs font-bold rounded-lg border-none transition-colors cursor-pointer"
+              className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-bold rounded-lg border-none transition-colors cursor-pointer ${
+                workflow?.githubEnabled
+                  ? 'bg-emerald-950 text-emerald-300 hover:bg-emerald-900 border border-emerald-500/30'
+                  : 'bg-neutral-900 hover:bg-neutral-850 text-neutral-200'
+              }`}
             >
-              <SlidersHorizontal className="w-3.5 h-3.5 text-rose-400" />
-              <span>Tools & Reports</span>
-              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isToolsMenuOpen ? 'rotate-180' : ''}`} />
+              <GitBranch className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Integrations & Reports</span>
+              {workflow?.githubEnabled && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isIntegrationsMenuOpen ? 'rotate-180' : ''}`} />
             </button>
 
             <AnimatePresence>
-              {isToolsMenuOpen && (
+              {isIntegrationsMenuOpen && (
                 <>
-                  <div className="fixed inset-0 z-20" onClick={() => setIsToolsMenuOpen(false)} />
+                  <div className="fixed inset-0 z-20" onClick={() => setIsIntegrationsMenuOpen(false)} />
                   <motion.div
                     initial={{ opacity: 0, y: 8, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.95 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute right-0 mt-2 w-60 bg-neutral-900 rounded-xl p-1.5 shadow-2xl z-30 font-mono text-xs space-y-1 border-none"
+                    className="absolute right-0 mt-2 w-64 bg-neutral-900 rounded-xl p-1.5 shadow-2xl z-30 font-mono text-xs space-y-1 border-none"
                   >
                     <button
+                      type="button"
                       onClick={() => {
-                        setIsToolsMenuOpen(false);
+                        setIsIntegrationsMenuOpen(false);
+                        handleOpenGithubModal();
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-emerald-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                    >
+                      <GitBranch className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <div>
+                        <div className="text-xs text-white font-bold flex items-center gap-1.5">
+                          GitHub Integration Center
+                          {workflow?.githubEnabled ? (
+                            <span className="text-[9px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-400 rounded font-mono">ACTIVE</span>
+                          ) : (
+                            <span className="text-[9px] px-1.5 py-0.2 bg-neutral-800 text-neutral-400 rounded font-mono">DISCONNECTED</span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-neutral-400 font-normal">Repo binding, webhooks, push tests & scanner</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsIntegrationsMenuOpen(false);
+                        handleOpenHistory();
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-purple-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                    >
+                      <History className="w-4 h-4 text-purple-400 shrink-0" />
+                      <div>
+                        <div className="text-xs text-white font-bold">Run Execution History</div>
+                        <div className="text-[10px] text-neutral-400 font-normal">View past execution logs & commit triggers</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsIntegrationsMenuOpen(false);
                         router.push(`/workflows/${workflowId}/report`);
                       }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-neutral-200 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-rose-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
                     >
                       <FileText className="w-4 h-4 text-rose-400 shrink-0" />
                       <div>
-                        <div className="text-xs text-white font-bold">Execution Report</div>
-                        <div className="text-[10px] text-neutral-400 font-normal">View step timing & logs</div>
+                        <div className="text-xs text-white font-bold">Execution Telemetry Report</div>
+                        <div className="text-[10px] text-neutral-400 font-normal">View step timing, HTTP status & latency breakdown</div>
                       </div>
                     </button>
 
                     <button
+                      type="button"
                       onClick={() => {
-                        setIsToolsMenuOpen(false);
+                        setIsIntegrationsMenuOpen(false);
                         setIsGuideOpen(true);
                       }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-neutral-200 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-amber-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
                     >
-                      <Sparkles className="w-4 h-4 text-rose-400 shrink-0" />
+                      <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
                       <div>
-                        <div className="text-xs text-white font-bold">Integration Guide</div>
-                        <div className="text-[10px] text-neutral-400 font-normal">cURL & SDK code snippets</div>
-                      </div>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setIsToolsMenuOpen(false);
-                        handleExportWorkflowJSON();
-                      }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-neutral-200 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
-                    >
-                      <Download className="w-4 h-4 text-rose-400 shrink-0" />
-                      <div>
-                        <div className="text-xs text-white font-bold">Export JSON</div>
-                        <div className="text-[10px] text-neutral-400 font-normal">Download workflow JSON file</div>
+                        <div className="text-xs text-white font-bold">cURL & SDK Integration Guide</div>
+                        <div className="text-[10px] text-neutral-400 font-normal">cURL, Fetch & Python SDK code snippets</div>
                       </div>
                     </button>
                   </motion.div>
@@ -2616,7 +2683,7 @@ export default function WorkflowDetailPage() {
           </motion.div>
         )}
 
-        {/* GitHub Repository Webhook Auto-Trigger Settings Modal */}
+        {/* GitHub A-to-Z Integration Control Center Modal */}
         {isGithubModalOpen && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -2628,324 +2695,534 @@ export default function WorkflowDetailPage() {
               initial={{ scale: 0.95, y: 15 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 15 }}
-              className="bg-neutral-950 p-6 rounded-2xl max-w-3xl w-full space-y-5 border-none shadow-2xl relative overflow-hidden max-h-[90vh] overflow-y-auto"
+              className="bg-neutral-950 p-6 rounded-2xl max-w-4xl w-full space-y-5 border-none shadow-2xl relative overflow-hidden max-h-[90vh] flex flex-col"
             >
               {/* Modal Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-neutral-900">
+              <div className="flex items-center justify-between pb-3 border-b border-neutral-900 shrink-0">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-emerald-950 text-emerald-400 flex items-center justify-center font-bold">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-950 text-emerald-400 flex items-center justify-center font-bold shadow-lg">
                     <GitBranch className="w-5 h-5 text-emerald-400" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-white tracking-wide">
-                      GitHub Push Trigger Configuration
-                    </h3>
-                    <span className="text-xs text-neutral-400 block">
-                      Automatically execute flow runner on git push events
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-white tracking-wide">
+                        GitHub Integration Center (A-to-Z)
+                      </h3>
+                      {githubEnabled ? (
+                        <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[10px] rounded font-bold font-mono border border-emerald-500/30 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          ACTIVE & CONNECTED
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 bg-neutral-900 text-neutral-400 text-[10px] rounded font-bold font-mono border border-neutral-800">
+                          DISCONNECTED
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs text-neutral-400 block pt-0.5">
+                      Repo binding, automated webhooks, push test simulations, endpoint scanner & commit audit logs
                     </span>
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setIsGithubModalOpen(false)}
-                  className="text-neutral-400 hover:text-white border-none bg-transparent cursor-pointer p-1"
+                  className="text-neutral-400 hover:text-white border-none bg-transparent cursor-pointer p-1 transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* Enable Switch Toggle Banner */}
-              <div className="p-4 bg-neutral-900 rounded-xl flex items-center justify-between border-none select-none">
-                <div className="space-y-0.5">
-                  <span className="text-xs font-bold text-white block">
-                    Enable GitHub Push Trigger
-                  </span>
-                  <span className="text-[11px] text-neutral-400 block">
-                    Automatically run this flow whenever code is pushed to your connected repository
-                  </span>
-                </div>
+              {/* Sub-Tab Navigation Header */}
+              <div className="flex items-center gap-2 border-b border-neutral-900 pb-2 overflow-x-auto shrink-0 select-none">
                 <button
                   type="button"
-                  onClick={() => setGithubEnabled(!githubEnabled)}
-                  className={`w-11 h-6 rounded-full p-0.5 transition-colors border-none cursor-pointer ${
-                    githubEnabled ? 'bg-emerald-600' : 'bg-neutral-800'
+                  onClick={() => setGithubModalTab('config')}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border-none flex items-center gap-1.5 ${
+                    githubModalTab === 'config'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'bg-neutral-900 hover:bg-neutral-850 text-neutral-400 hover:text-white'
                   }`}
                 >
-                  <div
-                    className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                      githubEnabled ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
+                  <Settings className="w-3.5 h-3.5" />
+                  <span>Repo & Webhook Config</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setGithubModalTab('simulation')}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border-none flex items-center gap-1.5 ${
+                    githubModalTab === 'simulation'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'bg-neutral-900 hover:bg-neutral-850 text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Push Simulation</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setGithubModalTab('scanner')}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border-none flex items-center gap-1.5 ${
+                    githubModalTab === 'scanner'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'bg-neutral-900 hover:bg-neutral-850 text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  <Code className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Repo Endpoint Scanner</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGithubModalTab('history');
+                    loadPastRuns();
+                  }}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border-none flex items-center gap-1.5 ${
+                    githubModalTab === 'history'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'bg-neutral-900 hover:bg-neutral-850 text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  <History className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Commit Audit Logs</span>
                 </button>
               </div>
 
-              {/* 2-Column Main Section Grid */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* Column 1: Automatic Repository Fetcher & Selector */}
-                <div className="p-4 bg-neutral-900 rounded-xl space-y-3 border-none flex flex-col justify-between">
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-rose-300 flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-rose-400" /> Repository Selector
-                      </span>
-                      <span className="text-[10px] text-neutral-400 font-mono">1-CLICK BIND</span>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-neutral-400 font-bold uppercase block">
-                        GitHub Username or Personal Access Token (PAT)
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={githubUserOrToken}
-                          onChange={(e) => setGithubUserOrToken(e.target.value)}
-                          placeholder="Username or ghp_xxx..."
-                          className="flex-1 px-3 py-2 bg-black border-none rounded-lg text-white text-xs outline-none font-mono min-w-0"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleFetchGithubRepos}
-                          disabled={isFetchingRepos || !githubUserOrToken.trim()}
-                          className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg border-none cursor-pointer flex items-center gap-1.5 shrink-0 disabled:opacity-50"
-                        >
-                          {isFetchingRepos ? (
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <Search className="w-3.5 h-3.5" />
-                          )}
-                          Fetch
-                        </button>
+              {/* Modal Body Content (Scrollable) */}
+              <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+                {/* TAB 1: Repo & Webhook Config */}
+                {githubModalTab === 'config' && (
+                  <div className="space-y-4">
+                    {/* Enable Switch Toggle Banner */}
+                    <div className="p-4 bg-neutral-900 rounded-xl flex items-center justify-between border-none select-none">
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-bold text-white block flex items-center gap-1.5">
+                          <Zap className="w-3.5 h-3.5 text-emerald-400" /> Enable GitHub Push Trigger
+                        </span>
+                        <span className="text-[11px] text-neutral-400 block">
+                          Automatically run this flow whenever code is pushed to your connected repository branch
+                        </span>
                       </div>
-                      <div className="flex items-center justify-between pt-1 text-[10px]">
-                        <span className="text-neutral-400">PAT supports private repos</span>
-                        <a
-                          href="https://github.com/settings/tokens/new?description=WakeUp+Flow+Runner&scopes=repo,admin:repo_hook"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-rose-300 font-bold hover:underline flex items-center gap-1"
-                        >
-                          <Key className="w-3 h-3 text-rose-400" /> Create Token
-                        </a>
-                      </div>
-                    </div>
-
-                    {repoFetchError && (
-                      <div className="p-2.5 bg-rose-950/80 text-rose-300 rounded-lg text-xs font-mono font-bold">
-                        {repoFetchError}
-                      </div>
-                    )}
-
-                    {/* Repositories List */}
-                    {fetchedRepos.length > 0 && (
-                      <div className="space-y-2 pt-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] text-neutral-300 uppercase font-bold">
-                            Select Repository ({fetchedRepos.length}):
-                          </span>
-                          <input
-                            type="text"
-                            placeholder="Filter..."
-                            value={repoSearchQuery}
-                            onChange={(e) => setRepoSearchQuery(e.target.value)}
-                            className="px-2 py-1 bg-black text-white text-[10px] rounded border-none outline-none font-mono w-28"
-                          />
-                        </div>
-
-                        <div className="max-h-40 overflow-y-auto space-y-1.5 p-1.5 bg-black rounded-lg">
-                          {fetchedRepos
-                            .filter(
-                              (r) =>
-                                !repoSearchQuery ||
-                                r.full_name.toLowerCase().includes(repoSearchQuery.toLowerCase()) ||
-                                r.description?.toLowerCase().includes(repoSearchQuery.toLowerCase())
-                            )
-                            .map((r) => {
-                              const isSelected = githubRepo.toLowerCase() === r.full_name.toLowerCase();
-                              return (
-                                <div
-                                  key={r.id}
-                                  onClick={() => handleSelectRepo(r)}
-                                  className={`p-2 rounded-lg cursor-pointer transition-all flex items-center justify-between gap-2 ${
-                                    isSelected
-                                      ? 'bg-rose-950 text-rose-300'
-                                      : 'bg-neutral-900 hover:bg-neutral-850 text-neutral-300'
-                                  }`}
-                                >
-                                  <div className="min-w-0">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="text-xs font-bold text-white truncate">{r.full_name}</span>
-                                      {r.private ? (
-                                        <span className="px-1 py-0.2 text-[9px] bg-neutral-950 text-amber-400 rounded font-mono">
-                                          Private
-                                        </span>
-                                      ) : (
-                                        <span className="px-1 py-0.2 text-[9px] bg-neutral-950 text-emerald-400 rounded font-mono">
-                                          Public
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${isSelected ? 'bg-rose-600 text-white' : 'bg-neutral-800'}`}>
-                                    {isSelected && <Check className="w-3 h-3" />}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* 1-Click Auto-Create Webhook on GitHub Button */}
-                  {githubUserOrToken.length > 20 && (
-                    <div className="pt-2 border-t border-neutral-850 flex flex-col gap-2">
                       <button
                         type="button"
-                        onClick={handleAutoCreateWebhookOnGitHub}
-                        disabled={isCreatingAutoWebhook || !githubRepo}
-                        className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg border-none cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                        onClick={() => setGithubEnabled(!githubEnabled)}
+                        className={`w-11 h-6 rounded-full p-0.5 transition-colors border-none cursor-pointer ${
+                          githubEnabled ? 'bg-emerald-600' : 'bg-neutral-800'
+                        }`}
                       >
-                        {isCreatingAutoWebhook ? (
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Zap className="w-3.5 h-3.5" />
-                        )}
-                        Auto-Create Webhook on GitHub API
+                        <div
+                          className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                            githubEnabled ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
                       </button>
-                      {autoWebhookMsg && (
-                        <div className="p-2 bg-black text-xs font-mono font-bold text-emerald-300 rounded text-center">
-                          {autoWebhookMsg}
+                    </div>
+
+                    {/* 2-Column Main Section Grid */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {/* Column 1: Automatic Repository Fetcher & Selector */}
+                      <div className="p-4 bg-neutral-900 rounded-xl space-y-3 border-none flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-rose-300 flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5 text-rose-400" /> Repository Selector
+                            </span>
+                            <span className="text-[10px] text-neutral-400 font-mono">1-CLICK BIND</span>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] text-neutral-400 font-bold uppercase block">
+                              GitHub Username or Personal Access Token (PAT)
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={githubUserOrToken}
+                                onChange={(e) => setGithubUserOrToken(e.target.value)}
+                                placeholder="Username or ghp_xxx..."
+                                className="flex-1 px-3 py-2 bg-black border-none rounded-lg text-white text-xs outline-none font-mono min-w-0"
+                              />
+                              <button
+                                type="button"
+                                onClick={handleFetchGithubRepos}
+                                disabled={isFetchingRepos || !githubUserOrToken.trim()}
+                                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg border-none cursor-pointer flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+                              >
+                                {isFetchingRepos ? (
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Search className="w-3.5 h-3.5" />
+                                )}
+                                Fetch
+                              </button>
+                            </div>
+                            <div className="flex items-center justify-between pt-1 text-[10px]">
+                              <span className="text-neutral-400">PAT supports private repos</span>
+                              <a
+                                href="https://github.com/settings/tokens/new?description=WakeUp+Flow+Runner&scopes=repo,admin:repo_hook"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-rose-300 font-bold hover:underline flex items-center gap-1"
+                              >
+                                <Key className="w-3 h-3 text-rose-400" /> Create Token
+                              </a>
+                            </div>
+                          </div>
+
+                          {repoFetchError && (
+                            <div className="p-2.5 bg-rose-950/80 text-rose-300 rounded-lg text-xs font-mono font-bold">
+                              {repoFetchError}
+                            </div>
+                          )}
+
+                          {/* Repositories List */}
+                          {fetchedRepos.length > 0 && (
+                            <div className="space-y-2 pt-1">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-neutral-300 uppercase font-bold">
+                                  Select Repository ({fetchedRepos.length}):
+                                </span>
+                                <input
+                                  type="text"
+                                  placeholder="Filter..."
+                                  value={repoSearchQuery}
+                                  onChange={(e) => setRepoSearchQuery(e.target.value)}
+                                  className="px-2 py-1 bg-black text-white text-[10px] rounded border-none outline-none font-mono w-28"
+                                />
+                              </div>
+
+                              <div className="max-h-40 overflow-y-auto space-y-1.5 p-1.5 bg-black rounded-lg">
+                                {fetchedRepos
+                                  .filter(
+                                    (r) =>
+                                      !repoSearchQuery ||
+                                      r.full_name.toLowerCase().includes(repoSearchQuery.toLowerCase()) ||
+                                      r.description?.toLowerCase().includes(repoSearchQuery.toLowerCase())
+                                  )
+                                  .map((r) => {
+                                    const isSelected = githubRepo.toLowerCase() === r.full_name.toLowerCase();
+                                    return (
+                                      <div
+                                        key={r.id}
+                                        onClick={() => handleSelectRepo(r)}
+                                        className={`p-2 rounded-lg cursor-pointer transition-all flex items-center justify-between gap-2 ${
+                                          isSelected
+                                            ? 'bg-rose-950 text-rose-300'
+                                            : 'bg-neutral-900 hover:bg-neutral-850 text-neutral-300'
+                                        }`}
+                                      >
+                                        <div className="min-w-0">
+                                          <div className="flex items-center gap-1.5 flex-wrap">
+                                            <span className="text-xs font-bold text-white truncate">{r.full_name}</span>
+                                            {r.private ? (
+                                              <span className="px-1 py-0.2 text-[9px] bg-neutral-950 text-amber-400 rounded font-mono">
+                                                Private
+                                              </span>
+                                            ) : (
+                                              <span className="px-1 py-0.2 text-[9px] bg-neutral-950 text-emerald-400 rounded font-mono">
+                                                Public
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${isSelected ? 'bg-rose-600 text-white' : 'bg-neutral-800'}`}>
+                                          {isSelected && <Check className="w-3 h-3" />}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 1-Click Auto-Create Webhook on GitHub Button */}
+                        {githubUserOrToken.length > 20 && (
+                          <div className="pt-2 border-t border-neutral-850 flex flex-col gap-2">
+                            <button
+                              type="button"
+                              onClick={handleAutoCreateWebhookOnGitHub}
+                              disabled={isCreatingAutoWebhook || !githubRepo}
+                              className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg border-none cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                              {isCreatingAutoWebhook ? (
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Zap className="w-3.5 h-3.5" />
+                              )}
+                              Auto-Create Webhook on GitHub API
+                            </button>
+                            {autoWebhookMsg && (
+                              <div className="p-2 bg-black text-xs font-mono font-bold text-emerald-300 rounded text-center">
+                                {autoWebhookMsg}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Column 2: Connected Repository & Branch Details + Webhook Payload URL */}
+                      <div className="space-y-4 flex flex-col justify-between">
+                        <div className="space-y-3 bg-neutral-900 p-4 rounded-xl">
+                          <div className="space-y-1">
+                            <label className="text-[10px] text-neutral-300 uppercase font-bold block">
+                              Connected Repository (owner/repo)
+                            </label>
+                            <input
+                              type="text"
+                              value={githubRepo}
+                              onChange={(e) => setGithubRepo(e.target.value)}
+                              placeholder="e.g. ritik125V/WakeUp"
+                              className="w-full px-3 py-2 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] text-neutral-300 uppercase font-bold block">
+                              Target Branch
+                            </label>
+                            <input
+                              type="text"
+                              value={githubBranch}
+                              onChange={(e) => setGithubBranch(e.target.value)}
+                              placeholder="main"
+                              className="w-full px-3 py-2 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] text-rose-300 uppercase font-bold block flex items-center gap-1">
+                              <Key className="w-3 h-3 text-rose-400" /> Report Recipient Email (Nodemailer)
+                            </label>
+                            <input
+                              type="email"
+                              value={notificationEmail}
+                              onChange={(e) => setNotificationEmail(e.target.value)}
+                              placeholder="e.g. dev-alerts@company.com"
+                              className="w-full px-3 py-2 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
+                            />
+                            <span className="text-[10px] text-neutral-400 block pt-0.5">
+                              Nodemailer will send execution reports to this email on git commits.
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Webhook Payload URL Box */}
+                        <div className="p-4 bg-neutral-900 rounded-xl space-y-2 border-none">
+                          <div className="flex items-center justify-between text-[10px] font-bold text-neutral-300">
+                            <span>GITHUB WEBHOOK PAYLOAD URL</span>
+                            <span className="text-emerald-400">JSON</span>
+                          </div>
+
+                          <div className="flex items-center gap-2 bg-black p-2 rounded-lg border-none">
+                            <code className="text-[11px] text-rose-300 truncate flex-1 font-mono">
+                              {typeof window !== 'undefined'
+                                ? `${window.location.protocol}//${window.location.host}/api/workflows/github-webhook?token=${
+                                    githubSecretToken || workflow?.githubSecretToken || 'secret-token'
+                                  }`
+                                : `/api/workflows/github-webhook?token=${githubSecretToken}`}
+                            </code>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const url = `${window.location.protocol}//${window.location.host}/api/workflows/github-webhook?token=${
+                                  githubSecretToken || workflow?.githubSecretToken || ''
+                                }`;
+                                navigator.clipboard.writeText(url);
+                                setCopiedWebhookUrl(true);
+                                setTimeout(() => setCopiedWebhookUrl(false), 2000);
+                              }}
+                              className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded font-bold text-xs border-none cursor-pointer shrink-0 flex items-center gap-1"
+                            >
+                              {copiedWebhookUrl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                              <span>{copiedWebhookUrl ? 'Copied' : 'Copy'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Quick Setup Guide */}
+                    <div className="p-4 bg-neutral-900 rounded-xl space-y-2 border-none">
+                      <span className="text-xs font-bold text-white block">
+                        Quick GitHub Webhook Setup Guide
+                      </span>
+                      <ol className="list-decimal list-inside space-y-1 text-xs text-neutral-300 leading-relaxed">
+                        <li>
+                          Open GitHub Repo $\rightarrow$ <strong>Settings</strong> $\rightarrow$ <strong>Webhooks</strong> $\rightarrow$ <strong>Add webhook</strong>.
+                        </li>
+                        <li>Paste the <strong>Payload URL</strong> copied above.</li>
+                        <li>Set <strong>Content type</strong> to <code className="text-emerald-400">application/json</code> and select <strong>Just the push event</strong>.</li>
+                      </ol>
+                    </div>
+                  </div>
+                )}
+
+                {/* TAB 2: Push Simulation */}
+                {githubModalTab === 'simulation' && (
+                  <div className="space-y-4">
+                    <div className="p-5 bg-neutral-900 rounded-xl space-y-3 border-none">
+                      <div className="flex items-center gap-2 text-rose-300 font-bold text-sm">
+                        <Zap className="w-4 h-4 text-amber-400" />
+                        Simulate Git Push Webhook Event
+                      </div>
+                      <p className="text-neutral-400 text-xs leading-relaxed">
+                        Test your workflow execution against simulated Git push events in real-time. This sends a mock GitHub push payload to verify step execution without pushing commits to GitHub.
+                      </p>
+
+                      <div className="p-3 bg-black rounded-lg space-y-2 font-mono text-xs border-none">
+                        <div className="flex items-center justify-between text-neutral-400">
+                          <span>Simulated Repo:</span>
+                          <span className="text-white font-bold">{githubRepo || 'ritik125V/WakeUp'}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-neutral-400">
+                          <span>Target Branch:</span>
+                          <span className="text-emerald-400 font-bold">{githubBranch || 'main'}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-neutral-400">
+                          <span>Event Payload:</span>
+                          <span className="text-purple-300 font-bold">ref: refs/heads/{githubBranch || 'main'}</span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleSimulateGitPush}
+                        disabled={isSimulatingPush}
+                        className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg border-none cursor-pointer flex items-center justify-center gap-2 shadow-lg disabled:opacity-50 transition-colors"
+                      >
+                        {isSimulatingPush ? (
+                          <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                        ) : (
+                          <Zap className="w-4 h-4 fill-current text-white" />
+                        )}
+                        Dispatch Git Push Webhook Simulation
+                      </button>
+
+                      {pushSimResult && (
+                        <div className="p-4 bg-black rounded-xl space-y-2 border-none">
+                          <span className="text-xs font-bold text-emerald-400 block">Simulation Telemetry Output:</span>
+                          <pre className="text-xs font-mono text-neutral-200 whitespace-pre-wrap leading-relaxed">
+                            {pushSimResult}
+                          </pre>
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-
-                {/* Column 2: Connected Repository & Branch Details + Webhook Payload URL */}
-                <div className="space-y-4 flex flex-col justify-between">
-                  <div className="space-y-3 bg-neutral-900 p-4 rounded-xl">
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-neutral-300 uppercase font-bold block">
-                        Connected Repository (owner/repo)
-                      </label>
-                      <input
-                        type="text"
-                        value={githubRepo}
-                        onChange={(e) => setGithubRepo(e.target.value)}
-                        placeholder="e.g. ritik125V/WakeUp"
-                        className="w-full px-3 py-2 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-neutral-300 uppercase font-bold block">
-                        Target Branch
-                      </label>
-                      <input
-                        type="text"
-                        value={githubBranch}
-                        onChange={(e) => setGithubBranch(e.target.value)}
-                        placeholder="main"
-                        className="w-full px-3 py-2 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-rose-300 uppercase font-bold block flex items-center gap-1">
-                        <Key className="w-3 h-3 text-rose-400" /> Report Recipient Email (Nodemailer)
-                      </label>
-                      <input
-                        type="email"
-                        value={notificationEmail}
-                        onChange={(e) => setNotificationEmail(e.target.value)}
-                        placeholder="e.g. dev-alerts@company.com"
-                        className="w-full px-3 py-2 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
-                      />
-                      <span className="text-[10px] text-neutral-400 block pt-0.5">
-                        Nodemailer will send an execution report email when commits trigger this workflow.
-                      </span>
-                    </div>
                   </div>
+                )}
 
-                  {/* Webhook Payload URL Box */}
-                  <div className="p-4 bg-neutral-900 rounded-xl space-y-2 border-none">
-                    <div className="flex items-center justify-between text-[10px] font-bold text-neutral-300">
-                      <span>GITHUB WEBHOOK PAYLOAD URL</span>
-                      <span className="text-emerald-400">JSON</span>
-                    </div>
+                {/* TAB 3: Repo Endpoint Scanner */}
+                {githubModalTab === 'scanner' && (
+                  <div className="space-y-4">
+                    <div className="p-5 bg-neutral-900 rounded-xl space-y-3 border-none">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-purple-300 font-bold text-sm">
+                          <Code className="w-4 h-4 text-purple-400" />
+                          GitHub Repository Code Scanner
+                        </div>
+                        <span className="text-[10px] text-neutral-400 font-mono">AUTOMATED ROUTE EXTRACTION</span>
+                      </div>
+                      <p className="text-neutral-400 text-xs leading-relaxed">
+                        Scan all route files in <strong>{githubRepo || 'connected repository'}</strong> to automatically extract API endpoints (Express, NestJS, FastAPI, Next.js) and import them into this workflow.
+                      </p>
 
-                    <div className="flex items-center gap-2 bg-black p-2 rounded-lg border-none">
-                      <code className="text-[11px] text-rose-300 truncate flex-1 font-mono">
-                        {typeof window !== 'undefined'
-                          ? `${window.location.protocol}//${window.location.host}/api/workflows/github-webhook?token=${
-                              githubSecretToken || workflow?.githubSecretToken || 'secret-token'
-                            }`
-                          : `/api/workflows/github-webhook?token=${githubSecretToken}`}
-                      </code>
                       <button
                         type="button"
                         onClick={() => {
-                          const url = `${window.location.protocol}//${window.location.host}/api/workflows/github-webhook?token=${
-                            githubSecretToken || workflow?.githubSecretToken || ''
-                          }`;
-                          navigator.clipboard.writeText(url);
-                          setCopiedWebhookUrl(true);
-                          setTimeout(() => setCopiedWebhookUrl(false), 2000);
+                          setIsGithubModalOpen(false);
+                          handleOpenScanner();
                         }}
-                        className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded font-bold text-xs border-none cursor-pointer shrink-0 flex items-center gap-1"
+                        className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-lg border-none cursor-pointer flex items-center justify-center gap-2 shadow-lg transition-colors"
                       >
-                        {copiedWebhookUrl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedWebhookUrl ? 'Copied' : 'Copy'}</span>
+                        <Sparkles className="w-4 h-4 text-white" />
+                        Launch Code Endpoint Scanner for {githubRepo || 'Connected Repo'}
                       </button>
                     </div>
                   </div>
-                </div>
-              </div>
+                )}
 
-              {/* Step-by-Step Setup Guide */}
-              <div className="p-4 bg-neutral-900 rounded-xl space-y-2 border-none">
-                <span className="text-xs font-bold text-white block">
-                  Quick GitHub Webhook Setup Guide
-                </span>
-                <ol className="list-decimal list-inside space-y-1 text-xs text-neutral-300 leading-relaxed">
-                  <li>
-                    Open GitHub Repo $\rightarrow$ <strong>Settings</strong> $\rightarrow$ <strong>Webhooks</strong> $\rightarrow$ <strong>Add webhook</strong>.
-                  </li>
-                  <li>Paste the <strong>Payload URL</strong> copied above.</li>
-                  <li>Set <strong>Content type</strong> to <code className="text-emerald-400">application/json</code> and select <strong>Just the push event</strong>.</li>
-                </ol>
-              </div>
+                {/* TAB 4: Commit Execution Audit */}
+                {githubModalTab === 'history' && (
+                  <div className="space-y-4">
+                    <div className="p-4 bg-neutral-900 rounded-xl space-y-3 border-none">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <History className="w-4 h-4 text-cyan-400" /> Commit Triggered Execution History
+                        </span>
+                        <button
+                          type="button"
+                          onClick={loadPastRuns}
+                          disabled={loadingPastRuns}
+                          className="px-2.5 py-1 bg-black text-neutral-300 hover:text-white rounded text-[10px] font-bold border-none cursor-pointer flex items-center gap-1"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${loadingPastRuns ? 'animate-spin' : ''}`} />
+                          Refresh
+                        </button>
+                      </div>
 
-              {/* Simulation Push Test Button */}
-              <div className="p-3.5 bg-neutral-900 rounded-xl space-y-2 border-none">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-neutral-300">
-                    Test Webhook Push Simulation
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleSimulateGitPush}
-                    disabled={isSimulatingPush}
-                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg border-none cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-                  >
-                    {isSimulatingPush ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Zap className="w-3.5 h-3.5" />
-                    )}
-                    Simulate Git Push Now
-                  </button>
-                </div>
+                      {loadingPastRuns ? (
+                        <div className="py-8 text-center text-neutral-400 font-mono text-xs flex items-center justify-center gap-2">
+                          <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" /> Loading past execution runs...
+                        </div>
+                      ) : pastRuns.length === 0 ? (
+                        <div className="py-8 text-center text-neutral-400 font-mono text-xs space-y-1">
+                          <div>No past execution runs found.</div>
+                          <div className="text-[10px] text-neutral-400">Trigger a push simulation or manual run to generate logs.</div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                          {pastRuns.map((run) => (
+                            <div
+                              key={run._id}
+                              className="p-3 bg-black rounded-lg border-none flex items-center justify-between gap-3 text-xs font-mono"
+                            >
+                              <div className="space-y-1 min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    run.status === 'PASSED'
+                                      ? 'bg-emerald-500/20 text-emerald-300'
+                                      : 'bg-rose-500/20 text-rose-300'
+                                  }`}>
+                                    {run.status}
+                                  </span>
+                                  <span className="text-neutral-300 font-bold">
+                                    {run.triggeredBy || 'Manual Run'}
+                                  </span>
+                                  {run.commitHash && (
+                                    <span className="text-[10px] text-purple-300 font-mono">
+                                      #{run.commitHash.substring(0, 7)}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-neutral-400 flex items-center gap-3">
+                                  <span>Passed: {run.passedSteps}/{run.totalSteps} steps</span>
+                                  <span>Duration: {run.totalDurationMs}ms</span>
+                                  <span>{new Date(run.executedAt).toLocaleString()}</span>
+                                </div>
+                              </div>
 
-                {pushSimResult && (
-                  <div className="p-2.5 bg-black rounded-lg text-xs font-mono font-bold text-emerald-300 border-none">
-                    {pushSimResult}
+                              <button
+                                type="button"
+                                onClick={() => router.push(`/workflows/${workflowId}/report`)}
+                                className="px-3 py-1.5 bg-neutral-900 hover:bg-neutral-850 text-rose-300 font-bold rounded text-xs border-none cursor-pointer flex items-center gap-1 shrink-0"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                Report
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
 
-              {/* Footer Actions */}
-              <div className="flex items-center justify-between pt-3 border-t border-neutral-900">
+              {/* Modal Footer Actions */}
+              <div className="flex items-center justify-between pt-3 border-t border-neutral-900 shrink-0">
                 <button
                   type="button"
                   onClick={() => {
@@ -2955,7 +3232,7 @@ export default function WorkflowDetailPage() {
                   className="px-3 py-2 bg-purple-950/80 hover:bg-purple-900 text-purple-300 border-none text-xs font-bold rounded-lg cursor-pointer flex items-center gap-1.5"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                  Scan Code Endpoints
+                  Open Code Scanner
                 </button>
 
                 <div className="flex items-center gap-2">
@@ -3466,6 +3743,103 @@ export default function WorkflowDetailPage() {
         onClose={() => setIsAiSpecModalOpen(false)}
         onImport={handleImportAiSpec}
       />
+
+      {/* SAVED RUN HISTORY MODAL DRAWER */}
+      <AnimatePresence>
+        {isRunHistoryOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm font-mono">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-3xl p-6 bg-neutral-950 rounded-2xl space-y-4 shadow-2xl border border-purple-500/20 max-h-[85vh] overflow-y-auto"
+            >
+              <div className="flex items-center justify-between border-b border-neutral-900 pb-3">
+                <div className="flex items-center gap-2">
+                  <History className="w-5 h-5 text-purple-400" />
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Execution Run History</h3>
+                    <p className="text-[11px] text-neutral-400">Past executions saved in database (including automated GitHub push triggers)</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsRunHistoryOpen(false)}
+                  className="p-1 hover:bg-neutral-900 rounded text-neutral-400 hover:text-white border-none cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {loadingPastRuns ? (
+                <div className="p-12 text-center text-xs text-neutral-400 flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-purple-400" /> Loading execution run history...
+                </div>
+              ) : pastRuns.length === 0 ? (
+                <div className="p-12 text-center text-xs text-neutral-500 bg-neutral-900/40 rounded-xl">
+                  No past execution run reports recorded in database yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {pastRuns.map((run) => (
+                    <div
+                      key={run._id}
+                      className="p-4 bg-neutral-900/80 hover:bg-neutral-900 rounded-xl space-y-2 border border-white/5 transition-all text-xs"
+                    >
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                          {run.summary?.overallStatus === 'success' ? (
+                            <span className="px-2.5 py-0.5 bg-emerald-950 text-emerald-400 text-[10px] font-bold rounded flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400" /> PASSED
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-0.5 bg-rose-950 text-rose-400 text-[10px] font-bold rounded flex items-center gap-1">
+                              <XCircle className="w-3 h-3 text-rose-400" /> FAILED
+                            </span>
+                          )}
+
+                          {run.triggerSource === 'github_commit' ? (
+                            <span className="px-2 py-0.5 bg-purple-950 text-purple-300 text-[10px] font-bold rounded flex items-center gap-1">
+                              <GitBranch className="w-3.5 h-3.5 text-purple-400" /> GitHub Webhook
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 bg-neutral-800 text-neutral-300 text-[10px] font-bold rounded">
+                              {run.triggerSource || 'Manual'}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2 text-neutral-400 text-[11px]">
+                          <span><Zap className="w-3 h-3 text-amber-400 inline" /> {run.summary?.totalTimeMs || 0}ms</span>
+                          <span>{new Date(run.createdAt).toLocaleString()}</span>
+                          <button
+                            onClick={() => {
+                              setIsRunHistoryOpen(false);
+                              router.push(`/workflows/${workflowId}/report`);
+                            }}
+                            className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] rounded transition-all cursor-pointer border-none"
+                          >
+                            Open Report Page
+                          </button>
+                        </div>
+                      </div>
+
+                      {run.commitInfo?.commitMsg && (
+                        <div className="text-[11px] text-neutral-300 flex items-center gap-2 pt-1 border-t border-neutral-800/60">
+                          <GitCommit className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                          <span className="truncate">&quot;{run.commitInfo.commitMsg}&quot;</span>
+                          {run.commitInfo?.author && (
+                            <span className="text-neutral-500 text-[10px]">by {run.commitInfo.author}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

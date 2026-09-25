@@ -93,7 +93,7 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id || 'guest-user';
 
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    if (!mongoose.Types.ObjectId.isValid(String(req.params.id))) {
       return res.status(404).json({ error: 'Endpoint not found or invalid ID' });
     }
 

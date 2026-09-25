@@ -16,6 +16,7 @@ import {
   Radio,
   Terminal,
   Cpu,
+  GitBranch,
 } from 'lucide-react';
 
 export function AdminNavbar({
@@ -41,6 +42,7 @@ export function AdminNavbar({
     { href: '/users', label: 'Users', icon: Users },
     { href: '/endpoints', label: 'Monitored Pages', icon: Server },
     { href: '/workflows', label: 'Workflows', icon: Layers },
+    { href: '/workflows?tab=runs', label: 'Commit Audit Logs', icon: GitBranch },
     { href: '/status-pages', label: 'Status Pages', icon: Layout },
     { href: '/incidents', label: 'Incidents', icon: AlertTriangle },
     { href: '/logs', label: 'Live Stream Logs', icon: Terminal },

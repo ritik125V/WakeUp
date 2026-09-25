@@ -43,6 +43,7 @@ import { EndpointModel } from '../models/Endpoint.js';
 import { IncidentModel } from '../models/Incident.js';
 import { StatusPageModel } from '../models/StatusPage.js';
 import { WorkflowModel } from '../models/Workflow.js';
+import { WorkflowRunModel } from '../models/WorkflowRun.js';
 import { JWT_SECRET, authenticateToken, AuthRequest } from '../middleware/authMiddleware.js';
 import { getRedisClient } from '../config/redis.js';
 import { performHealthCheck, processCheckResult } from '../services/executionEngine.js';
@@ -787,6 +788,76 @@ router.get('/diagnostics', authenticateToken, requireAdmin, async (_req: AuthReq
   } catch (error: unknown) {
     console.error('Error computing diagnostics:', error);
     res.status(500).json({ error: 'Failed to compute system health diagnostics' });
+  }
+});
+
+/**
+ * ADMIN WORKFLOW RUNS AUDIT: Fetch All Workflow Execution Runs & Telemetry
+ */
+router.get('/workflow-runs', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 50;
+    const { status, repo, search } = req.query;
+
+    const query: any = {};
+    if (status && status !== 'all') {
+      query['summary.overallStatus'] = status;
+    }
+    if (repo && typeof repo === 'string') {
+      query.githubRepo = new RegExp(repo, 'i');
+    }
+
+    let runs = await WorkflowRunModel.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    // Collect user IDs to populate owner information
+    const userIds = Array.from(new Set(runs.map((r) => r.userId).filter(Boolean)));
+    const users = await UserModel.find({ _id: { $in: userIds } })
+      .select('email name')
+      .lean();
+
+    const userMap: Record<string, { email: string; name: string }> = {};
+    for (const u of users) {
+      userMap[u._id.toString()] = { email: u.email || '', name: u.name || '' };
+    }
+
+    const populatedRuns = runs.map((run) => {
+      const owner = userMap[run.userId] || {
+        email: run.commitInfo?.authorEmail || (run.userId === 'guest-user' ? 'guest@wakeup.dev' : `${run.userId}@wakeup.dev`),
+        name: run.commitInfo?.author || 'Workflow Owner',
+      };
+      return {
+        ...run,
+        owner,
+      };
+    });
+
+    // Client-side search filter if query string provided
+    let finalRuns = populatedRuns;
+    if (search && typeof search === 'string' && search.trim() !== '') {
+      const q = search.toLowerCase().trim();
+      finalRuns = populatedRuns.filter((r) => {
+        const wfName = r.workflowName?.toLowerCase() || '';
+        const repoName = r.githubRepo?.toLowerCase() || '';
+        const author = r.commitInfo?.author?.toLowerCase() || '';
+        const msg = r.commitInfo?.commitMsg?.toLowerCase() || '';
+        const email = r.owner?.email?.toLowerCase() || '';
+        return (
+          wfName.includes(q) ||
+          repoName.includes(q) ||
+          author.includes(q) ||
+          msg.includes(q) ||
+          email.includes(q)
+        );
+      });
+    }
+
+    res.json({ runs: finalRuns, count: finalRuns.length });
+  } catch (error: unknown) {
+    console.error('Error fetching admin workflow runs audit:', error);
+    res.status(500).json({ error: 'Failed to fetch workflow runs audit logs' });
   }
 });
 

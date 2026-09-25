@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { Server } from 'socket.io';
 import { WorkflowModel, IWorkflowStep } from '../models/Workflow';
+import { WorkflowRunModel } from '../models/WorkflowRun';
 import { UserModel } from '../models/User';
 import { sendWorkflowReportEmail, dispatchWorkflowReportEmailAsync } from './mailer';
 
@@ -449,8 +450,33 @@ export async function runWorkflowExecution(
         },
       }
     );
+
+    // Persist full execution run report to DB
+    const runSource = triggerSource?.includes('GitHub') || commitInfo?.repo
+      ? 'github_commit'
+      : (triggerSource as any) || 'manual';
+
+    await WorkflowRunModel.create({
+      workflowId: workflow._id,
+      userId: workflow.userId,
+      workflowName: workflow.name,
+      triggerSource: runSource,
+      githubRepo: commitInfo?.repo || workflow.githubRepo || '',
+      githubBranch: commitInfo?.branch || workflow.githubBranch || 'main',
+      commitInfo: commitInfo || {},
+      summary: {
+        totalSteps: workflow.steps.length,
+        successSteps,
+        failedSteps,
+        totalTimeMs,
+        overallStatus,
+        startedAt: new Date(startTimeTotal),
+        finishedAt: new Date(),
+      },
+      stepLogs,
+    });
   } catch (err) {
-    console.error('Failed to update workflow run status:', err);
+    console.error('Failed to update workflow run status & save run report:', err);
   }
 
   if (io) {
