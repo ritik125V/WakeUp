@@ -70,6 +70,9 @@ import {
   scanGithubRepoEndpoints,
   importScannedEndpointsToWorkflow,
   fetchWorkflowRunHistory,
+  fetchWebhookLogs,
+  getBackendWebhookUrl,
+  IWebhookLogItem,
   IScannedEndpoint,
   IGithubRepoItem,
   WorkflowData,
@@ -373,6 +376,8 @@ export default function WorkflowDetailPage() {
   const [isRunHistoryOpen, setIsRunHistoryOpen] = useState<boolean>(false);
   const [pastRuns, setPastRuns] = useState<any[]>([]);
   const [loadingPastRuns, setLoadingPastRuns] = useState<boolean>(false);
+  const [rawWebhookLogs, setRawWebhookLogs] = useState<IWebhookLogItem[]>([]);
+  const [loadingRawWebhookLogs, setLoadingRawWebhookLogs] = useState<boolean>(false);
 
   const loadPastRuns = async () => {
     try {
@@ -384,6 +389,24 @@ export default function WorkflowDetailPage() {
     } finally {
       setLoadingPastRuns(false);
     }
+  };
+
+  const loadRawWebhookLogs = async () => {
+    try {
+      setLoadingRawWebhookLogs(true);
+      const res = await fetchWebhookLogs();
+      setRawWebhookLogs(res.logs || []);
+    } catch (err) {
+      console.error('Failed to load raw webhook logs:', err);
+    } finally {
+      setLoadingRawWebhookLogs(false);
+    }
+  };
+
+  const handleOpenGithubModal = () => {
+    setIsGithubModalOpen(true);
+    loadPastRuns();
+    loadRawWebhookLogs();
   };
 
   const handleOpenHistory = () => {
@@ -673,9 +696,7 @@ export default function WorkflowDetailPage() {
       setAutoWebhookMsg('❌ Select a repository and enter a GitHub Access Token first');
       return;
     }
-    const webhookUrl = `${window.location.protocol}//${window.location.host}/api/workflows/github-webhook?token=${
-      githubSecretToken || workflow?.githubSecretToken || ''
-    }`;
+    const webhookUrl = getBackendWebhookUrl(githubSecretToken || workflow?.githubSecretToken || '');
     try {
       setIsCreatingAutoWebhook(true);
       setAutoWebhookMsg(null);
@@ -849,10 +870,6 @@ export default function WorkflowDetailPage() {
     }
   };
 
-  const handleOpenGithubModal = () => {
-    setIsGithubModalOpen(true);
-    loadPastRuns();
-  };
 
   const handleSimulateGitPush = async () => {
     if (!workflow) return;
@@ -3019,18 +3036,12 @@ export default function WorkflowDetailPage() {
 
                           <div className="flex items-center gap-2 bg-black p-2 rounded-lg border-none">
                             <code className="text-[11px] text-rose-300 truncate flex-1 font-mono">
-                              {typeof window !== 'undefined'
-                                ? `${window.location.protocol}//${window.location.host}/api/workflows/github-webhook?token=${
-                                    githubSecretToken || workflow?.githubSecretToken || 'secret-token'
-                                  }`
-                                : `/api/workflows/github-webhook?token=${githubSecretToken}`}
+                              {getBackendWebhookUrl(githubSecretToken || workflow?.githubSecretToken || 'secret-token')}
                             </code>
                             <button
                               type="button"
                               onClick={() => {
-                                const url = `${window.location.protocol}//${window.location.host}/api/workflows/github-webhook?token=${
-                                  githubSecretToken || workflow?.githubSecretToken || ''
-                                }`;
+                                const url = getBackendWebhookUrl(githubSecretToken || workflow?.githubSecretToken || '');
                                 navigator.clipboard.writeText(url);
                                 setCopiedWebhookUrl(true);
                                 setTimeout(() => setCopiedWebhookUrl(false), 2000);
@@ -3144,13 +3155,14 @@ export default function WorkflowDetailPage() {
                   </div>
                 )}
 
-                {/* TAB 4: Commit Execution Audit */}
+                {/* TAB 4: Commit Execution Audit & Live Webhook Delivery Hits */}
                 {githubModalTab === 'history' && (
                   <div className="space-y-4">
+                    {/* Section 1: Workflow Execution History */}
                     <div className="p-4 bg-neutral-900 rounded-xl space-y-3 border-none">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                          <History className="w-4 h-4 text-cyan-400" /> Commit Triggered Execution History
+                          <History className="w-4 h-4 text-cyan-400" /> Workflow Execution Runs ({pastRuns.length})
                         </span>
                         <button
                           type="button"
@@ -3168,12 +3180,12 @@ export default function WorkflowDetailPage() {
                           <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" /> Loading past execution runs...
                         </div>
                       ) : pastRuns.length === 0 ? (
-                        <div className="py-8 text-center text-neutral-400 font-mono text-xs space-y-1">
-                          <div>No past execution runs found.</div>
+                        <div className="py-6 text-center text-neutral-400 font-mono text-xs space-y-1">
+                          <div>No past execution runs recorded yet.</div>
                           <div className="text-[10px] text-neutral-400">Trigger a push simulation or manual run to generate logs.</div>
                         </div>
                       ) : (
-                        <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                           {pastRuns.map((run) => (
                             <div
                               key={run._id}
@@ -3212,6 +3224,77 @@ export default function WorkflowDetailPage() {
                                 <FileText className="w-3.5 h-3.5" />
                                 Report
                               </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Section 2: Live Incoming Webhook Delivery Logs */}
+                    <div className="p-4 bg-neutral-900 rounded-xl space-y-3 border-none">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                            <Zap className="w-4 h-4 text-emerald-400" /> Incoming Webhook HTTP Delivery Audit ({rawWebhookLogs.length})
+                          </span>
+                          <span className="text-[9px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-400 rounded font-mono">
+                            LIVE MONGO LOGS
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={loadRawWebhookLogs}
+                          disabled={loadingRawWebhookLogs}
+                          className="px-2.5 py-1 bg-black text-neutral-300 hover:text-white rounded text-[10px] font-bold border-none cursor-pointer flex items-center gap-1"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${loadingRawWebhookLogs ? 'animate-spin' : ''}`} />
+                          Refresh Hits
+                        </button>
+                      </div>
+
+                      {loadingRawWebhookLogs ? (
+                        <div className="py-8 text-center text-neutral-400 font-mono text-xs flex items-center justify-center gap-2">
+                          <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" /> Loading incoming webhook logs...
+                        </div>
+                      ) : rawWebhookLogs.length === 0 ? (
+                        <div className="py-6 text-center text-neutral-400 font-mono text-xs space-y-1 bg-black p-4 rounded-lg">
+                          <div className="text-rose-300 font-bold">No Webhook Hits Received Yet</div>
+                          <div className="text-[10px] text-neutral-400 max-w-md mx-auto leading-relaxed">
+                            GitHub servers have not reached <code className="text-purple-300">/api/workflows/github-webhook</code> yet. Verify your GitHub Webhook Payload URL or check if your local/production server host is reachable.
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                          {rawWebhookLogs.map((log) => (
+                            <div
+                              key={log._id}
+                              className="p-3 bg-black rounded-lg border-none space-y-1 font-mono text-xs"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    log.status === 'SUCCESS'
+                                      ? 'bg-emerald-500/20 text-emerald-300'
+                                      : log.status === 'UNBOUND'
+                                      ? 'bg-amber-500/20 text-amber-300'
+                                      : log.status === 'PING'
+                                      ? 'bg-cyan-500/20 text-cyan-300'
+                                      : 'bg-rose-500/20 text-rose-300'
+                                  }`}>
+                                    {log.status}
+                                  </span>
+                                  <span className="text-white font-bold">{log.repoFullName || 'Unknown Repo'}</span>
+                                  <span className="text-[10px] text-purple-300">({log.branch})</span>
+                                </div>
+                                <span className="text-[10px] text-neutral-400">
+                                  {new Date(log.receivedAt).toLocaleTimeString()}
+                                </span>
+                              </div>
+
+                              <div className="text-[11px] text-neutral-300 flex items-center justify-between gap-2">
+                                <span className="truncate">"{log.commitMsg || 'No commit msg'}" by @{log.author || 'github'}</span>
+                                <span className="text-[10px] text-neutral-400 shrink-0">IP: {log.clientIp}</span>
+                              </div>
                             </div>
                           ))}
                         </div>

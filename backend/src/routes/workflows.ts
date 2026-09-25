@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import axios from 'axios';
 import { WorkflowModel } from '../models/Workflow';
 import { WorkflowRunModel } from '../models/WorkflowRun';
+import { WebhookLogModel } from '../models/WebhookLog';
 import { authenticateToken, AuthRequest } from '../middleware/authMiddleware';
 import { runWorkflowExecution, executeSingleStepTest } from '../services/workflowRunner';
 import { scanGithubRepositoryEndpoints, listGithubRepoFiles } from '../services/codeEndpointScanner';
@@ -9,32 +10,110 @@ import { scanGithubRepositoryEndpoints, listGithubRepoFiles } from '../services/
 const router = Router();
 
 /**
+ * GET Endpoint for GitHub Webhook health check & manual browser verification
+ */
+router.get('/github-webhook', async (req: Request, res: Response) => {
+  const clientIp = (req.headers['x-forwarded-for'] as string) || req.ip || 'unknown';
+  console.log(`\n[🔍 GITHUB WEBHOOK HEALTH CHECK] GET hit from ${clientIp} at ${new Date().toISOString()}`);
+
+  try {
+    await WebhookLogModel.create({
+      githubEvent: 'get_ping',
+      repoFullName: 'health_check',
+      branch: 'main',
+      clientIp,
+      headersSnippet: req.headers,
+      bodySnippet: 'GET Health Check Ping',
+      status: 'PING',
+      matchedWorkflowCount: 0,
+      receivedAt: new Date(),
+    });
+  } catch (err) {
+    console.error('Failed to log GET webhook ping:', err);
+  }
+
+  res.json({
+    status: 'ONLINE',
+    message: 'WakeUp GitHub Webhook endpoint is online and listening for git push events!',
+    endpoint: '/api/workflows/github-webhook',
+    timestamp: new Date().toISOString(),
+    clientIp,
+  });
+});
+
+/**
+ * GET Endpoint to view recent raw GitHub webhook logs (for user/admin monitoring)
+ */
+router.get('/github-webhook/logs', async (req: Request, res: Response) => {
+  try {
+    const logs = await WebhookLogModel.find({}).sort({ receivedAt: -1 }).limit(30).lean();
+    res.json({ logs });
+  } catch (err) {
+    console.error('Failed to fetch webhook logs:', err);
+    res.status(500).json({ error: 'Failed to fetch webhook delivery logs' });
+  }
+});
+
+/**
  * PUBLIC UNAUTHENTICATED WEBHOOK: GitHub Push Event Auto-Trigger
  * Called directly by GitHub Webhook servers whenever code is pushed.
  */
 router.post('/github-webhook', async (req: Request, res: Response) => {
-  try {
-    const githubEvent = (req.headers['x-github-event'] as string) || 'push';
-    const payload = req.body || {};
+  const startTime = Date.now();
+  const clientIp = (req.headers['x-forwarded-for'] as string) || req.ip || 'unknown';
+  const githubEvent = (req.headers['x-github-event'] as string) || 'push';
+  const payload = req.body || {};
 
-    if (githubEvent === 'ping') {
-      return res.json({ message: 'GitHub Webhook Ping received! WakeUp Flow Runner connected successfully.' });
+  const tokenQuery = (req.query.token as string) || '';
+  const rawRepoName = (payload.repository?.full_name || payload.repository?.name || '').trim();
+  const repoFullName = rawRepoName.toLowerCase();
+  const repoShortName = (payload.repository?.name || '').toLowerCase().trim();
+
+  // Extract branch from ref (e.g., 'refs/heads/main' -> 'main')
+  const ref = payload.ref || '';
+  const branch = ref.startsWith('refs/heads/') ? ref.replace('refs/heads/', '') : ref || 'main';
+
+  const commitHash = payload.head_commit?.id || payload.after || '';
+  const commitMsg = payload.head_commit?.message?.split('\n')[0] || (commitHash ? commitHash.slice(0, 7) : 'Push code update');
+  const author = payload.head_commit?.author?.username || payload.pusher?.name || payload.sender?.login || 'github-user';
+  const authorEmail = payload.head_commit?.author?.email || payload.pusher?.email || payload.head_commit?.committer?.email || '';
+
+  console.log('\n===============================================================');
+  console.log(`[🚀 GITHUB WEBHOOK POST RECEIVED] ${new Date().toISOString()}`);
+  console.log(`Client IP: ${clientIp} | Event: ${githubEvent} | Query Token: ${tokenQuery || 'None'}`);
+  console.log(`Repository: "${rawRepoName}" | Branch: "${branch}"`);
+  console.log(`Commit: "${commitMsg}" by @${author} (${commitHash.slice(0, 7)})`);
+  console.log('===============================================================\n');
+
+  if (githubEvent === 'ping') {
+    try {
+      await WebhookLogModel.create({
+        githubEvent: 'ping',
+        repoFullName: rawRepoName,
+        branch,
+        commitHash,
+        commitMsg: 'GitHub Webhook Ping',
+        author,
+        authorEmail,
+        tokenQuery,
+        clientIp,
+        headersSnippet: req.headers,
+        bodySnippet: JSON.stringify(payload).slice(0, 1000),
+        status: 'PING',
+        matchedWorkflowCount: 0,
+        receivedAt: new Date(),
+      });
+    } catch (logErr) {
+      console.error('Failed to save webhook ping log:', logErr);
     }
 
-    const tokenQuery = (req.query.token as string) || '';
-    const rawRepoName = (payload.repository?.full_name || payload.repository?.name || '').trim();
-    const repoFullName = rawRepoName.toLowerCase();
-    const repoShortName = (payload.repository?.name || '').toLowerCase().trim();
-    
-    // Extract branch from ref (e.g., 'refs/heads/main' -> 'main')
-    const ref = payload.ref || '';
-    const branch = ref.startsWith('refs/heads/') ? ref.replace('refs/heads/', '') : ref || 'main';
+    return res.json({
+      message: 'GitHub Webhook Ping received! WakeUp Flow Runner connected successfully.',
+      repository: rawRepoName,
+    });
+  }
 
-    const commitHash = payload.head_commit?.id || payload.after || '';
-    const commitMsg = payload.head_commit?.message?.split('\n')[0] || (commitHash ? commitHash.slice(0, 7) : 'Push code update');
-    const author = payload.head_commit?.author?.username || payload.pusher?.name || payload.sender?.login || 'github-user';
-    const authorEmail = payload.head_commit?.author?.email || payload.pusher?.email || payload.head_commit?.committer?.email || '';
-
+  try {
     // Fetch candidate workflows
     const candidateWorkflows = await WorkflowModel.find({
       $or: [
@@ -73,8 +152,32 @@ router.post('/github-webhook', async (req: Request, res: Response) => {
       return false;
     });
 
+    const matchedIds = matchingWorkflows.map((w) => w._id.toString());
+    const webhookStatus = matchingWorkflows.length > 0 ? 'SUCCESS' : 'UNBOUND';
+
+    // ALWAYS Save Webhook Audit Log to MongoDB!
+    const logDoc = await WebhookLogModel.create({
+      githubEvent,
+      repoFullName: rawRepoName,
+      branch,
+      commitHash,
+      commitMsg,
+      author,
+      authorEmail,
+      tokenQuery,
+      clientIp,
+      headersSnippet: req.headers,
+      bodySnippet: JSON.stringify(payload).slice(0, 1000),
+      status: webhookStatus,
+      matchedWorkflowCount: matchingWorkflows.length,
+      matchedWorkflowIds: matchedIds,
+      receivedAt: new Date(),
+    });
+
+    console.log(`[GitHub Webhook Log Saved] ID: ${logDoc._id} | Status: ${webhookStatus} | Matched: ${matchingWorkflows.length} workflow(s)`);
+
     if (matchingWorkflows.length === 0) {
-      // Log an UNBOUND_WEBHOOK audit record in MongoDB so webhook attempts are never lost!
+      // Create WorkflowRun audit record for unbound webhooks
       try {
         await WorkflowRunModel.create({
           workflowId: 'unbound_webhook',
@@ -95,9 +198,9 @@ router.post('/github-webhook', async (req: Request, res: Response) => {
             totalSteps: 0,
             successSteps: 0,
             failedSteps: 1,
-            totalTimeMs: 0,
+            totalTimeMs: Date.now() - startTime,
             overallStatus: 'UNBOUND_WEBHOOK',
-            startedAt: new Date(),
+            startedAt: new Date(startTime),
             finishedAt: new Date(),
           },
           stepLogs: [
@@ -108,7 +211,7 @@ router.post('/github-webhook', async (req: Request, res: Response) => {
               method: 'POST',
               url: req.originalUrl,
               requestHeaders: req.headers as Record<string, string>,
-              latencyMs: 0,
+              latencyMs: Date.now() - startTime,
               status: 'failed',
               errorMessage: `GitHub webhook received for repo "${rawRepoName}" on branch "${branch}", but no active workflow matched the repo binding or secret token.`,
               timestamp: new Date().toISOString(),
@@ -116,11 +219,12 @@ router.post('/github-webhook', async (req: Request, res: Response) => {
           ],
         });
       } catch (logErr) {
-        console.error('Failed to log unbound webhook:', logErr);
+        console.error('Failed to log unbound workflow run:', logErr);
       }
 
       return res.json({
         message: 'GitHub Webhook received & logged in DB, but no active matching workflow was found.',
+        webhookLogId: logDoc._id,
         repository: rawRepoName,
         branch,
         commitMsg,
@@ -134,6 +238,7 @@ router.post('/github-webhook', async (req: Request, res: Response) => {
     for (const wf of matchingWorkflows) {
       // Check branch matching if branch is specified (and not wildcard '*')
       if (wf.githubBranch && wf.githubBranch !== '*' && wf.githubBranch.toLowerCase() !== branch.toLowerCase()) {
+        console.log(`[Branch Mismatch] Workflow "${wf.name}" target branch (${wf.githubBranch}) !== push branch (${branch}). Skipping.`);
         continue;
       }
 
@@ -142,6 +247,8 @@ router.post('/github-webhook', async (req: Request, res: Response) => {
       wf.lastTriggeredAt = new Date();
       wf.lastRunStatus = 'pending';
       await wf.save();
+
+      console.log(`[🚀 Executing Workflow] ID: ${wf._id} | Name: "${wf.name}" | Steps: ${wf.steps.length}`);
 
       // Trigger workflow execution with complete commit metadata
       runWorkflowExecution(wf._id.toString(), {
@@ -162,6 +269,7 @@ router.post('/github-webhook', async (req: Request, res: Response) => {
 
     res.json({
       message: `Triggered ${triggeredIds.length} workflow(s) automatically via GitHub Push`,
+      webhookLogId: logDoc._id,
       triggeredWorkflowIds: triggeredIds,
       repository: rawRepoName,
       branch,
@@ -170,6 +278,26 @@ router.post('/github-webhook', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error handling GitHub webhook:', error);
+
+    try {
+      await WebhookLogModel.create({
+        githubEvent,
+        repoFullName: rawRepoName,
+        branch,
+        commitHash,
+        commitMsg,
+        author,
+        clientIp,
+        headersSnippet: req.headers,
+        bodySnippet: JSON.stringify(payload).slice(0, 1000),
+        status: 'ERROR',
+        matchedWorkflowCount: 0,
+        receivedAt: new Date(),
+      });
+    } catch {
+      // ignore secondary log error
+    }
+
     res.status(500).json({ error: 'Failed to process GitHub webhook' });
   }
 });

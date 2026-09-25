@@ -819,3 +819,37 @@ export const importScannedEndpointsToWorkflow = async (
   return response.data;
 };
 
+export interface IWebhookLogItem {
+  _id: string;
+  githubEvent: string;
+  repoFullName: string;
+  branch: string;
+  commitHash: string;
+  commitMsg: string;
+  author: string;
+  authorEmail?: string;
+  tokenQuery?: string;
+  clientIp: string;
+  status: 'SUCCESS' | 'UNBOUND' | 'ERROR' | 'PING';
+  matchedWorkflowCount: number;
+  receivedAt: string;
+}
+
+export const fetchWebhookLogs = async (): Promise<{ logs: IWebhookLogItem[] }> => {
+  const response = await apiClient.get<{ logs: IWebhookLogItem[] }>('/workflows/github-webhook/logs');
+  return response.data;
+};
+
+export const getBackendWebhookUrl = (secretToken: string = ''): string => {
+  let baseUrl = process.env.NEXT_PUBLIC_API_URL || API_BASE_URL || '';
+  if (!baseUrl && typeof window !== 'undefined') {
+    baseUrl = `${window.location.protocol}//${window.location.host}/api`;
+  }
+  baseUrl = baseUrl.replace(/\/+$/, '');
+  if (!baseUrl.endsWith('/api')) {
+    baseUrl += '/api';
+  }
+  return `${baseUrl}/workflows/github-webhook?token=${secretToken}`;
+};
+
+
