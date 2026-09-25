@@ -22,39 +22,109 @@ router.post('/github-webhook', async (req: Request, res: Response) => {
     }
 
     const tokenQuery = (req.query.token as string) || '';
-    const repoFullName = (payload.repository?.full_name || payload.repository?.name || '').toLowerCase().trim();
+    const rawRepoName = (payload.repository?.full_name || payload.repository?.name || '').trim();
+    const repoFullName = rawRepoName.toLowerCase();
+    const repoShortName = (payload.repository?.name || '').toLowerCase().trim();
     
     // Extract branch from ref (e.g., 'refs/heads/main' -> 'main')
     const ref = payload.ref || '';
     const branch = ref.startsWith('refs/heads/') ? ref.replace('refs/heads/', '') : ref || 'main';
 
-    const commitMsg = payload.head_commit?.message?.split('\n')[0] || (payload.head_commit?.id ? payload.head_commit.id.slice(0, 7) : 'Push code update');
+    const commitHash = payload.head_commit?.id || payload.after || '';
+    const commitMsg = payload.head_commit?.message?.split('\n')[0] || (commitHash ? commitHash.slice(0, 7) : 'Push code update');
     const author = payload.head_commit?.author?.username || payload.pusher?.name || payload.sender?.login || 'github-user';
     const authorEmail = payload.head_commit?.author?.email || payload.pusher?.email || payload.head_commit?.committer?.email || '';
 
-    // Find matching workflows in MongoDB
-    const queryConditions: any[] = [];
-    if (tokenQuery) {
-      queryConditions.push({ githubSecretToken: tokenQuery });
-    }
-    if (repoFullName) {
-      queryConditions.push({ githubRepo: { $regex: new RegExp(`^${repoFullName}$`, 'i') } });
-    }
+    // Fetch candidate workflows
+    const candidateWorkflows = await WorkflowModel.find({
+      $or: [
+        { githubEnabled: true },
+        { githubSecretToken: tokenQuery && tokenQuery.length > 0 ? tokenQuery : 'non_existent_token_xxx' }
+      ]
+    });
 
-    if (queryConditions.length === 0) {
-      return res.status(400).json({ error: 'No repository or token specified in GitHub payload' });
-    }
+    // Flexible Repository & Token Matching Logic
+    const matchingWorkflows = candidateWorkflows.filter((wf) => {
+      // 1. Secret Token match
+      if (tokenQuery && wf.githubSecretToken && wf.githubSecretToken === tokenQuery) {
+        return true;
+      }
 
-    const matchingWorkflows = await WorkflowModel.find({
-      githubEnabled: true,
-      $or: queryConditions,
+      // 2. Must be githubEnabled if token does not explicitly match
+      if (!wf.githubEnabled) return false;
+
+      // 3. Match repository name flexibly (full name, short name, URL prefix)
+      if (!wf.githubRepo) return false;
+      const cleanWfRepo = wf.githubRepo.toLowerCase().replace('https://github.com/', '').trim();
+      if (!cleanWfRepo) return false;
+
+      const wfShortName = cleanWfRepo.includes('/') ? cleanWfRepo.split('/').pop()! : cleanWfRepo;
+
+      if (cleanWfRepo === repoFullName || cleanWfRepo === repoShortName) {
+        return true;
+      }
+      if (repoShortName && wfShortName === repoShortName) {
+        return true;
+      }
+      if (repoFullName && (cleanWfRepo.endsWith('/' + repoShortName) || repoFullName.endsWith('/' + wfShortName))) {
+        return true;
+      }
+
+      return false;
     });
 
     if (matchingWorkflows.length === 0) {
+      // Log an UNBOUND_WEBHOOK audit record in MongoDB so webhook attempts are never lost!
+      try {
+        await WorkflowRunModel.create({
+          workflowId: 'unbound_webhook',
+          userId: 'system',
+          workflowName: `Unbound GitHub Push: ${rawRepoName || 'Unknown Repo'}`,
+          triggerSource: 'unbound_webhook',
+          githubRepo: rawRepoName,
+          githubBranch: branch,
+          commitInfo: {
+            commitMsg,
+            author,
+            authorEmail,
+            commitHash,
+            repo: rawRepoName,
+            branch,
+          },
+          summary: {
+            totalSteps: 0,
+            successSteps: 0,
+            failedSteps: 1,
+            totalTimeMs: 0,
+            overallStatus: 'UNBOUND_WEBHOOK',
+            startedAt: new Date(),
+            finishedAt: new Date(),
+          },
+          stepLogs: [
+            {
+              stepIndex: 1,
+              stepId: 'unbound-step',
+              stepName: 'Webhook Delivery Audit',
+              method: 'POST',
+              url: req.originalUrl,
+              requestHeaders: req.headers as Record<string, string>,
+              latencyMs: 0,
+              status: 'failed',
+              errorMessage: `GitHub webhook received for repo "${rawRepoName}" on branch "${branch}", but no active workflow matched the repo binding or secret token.`,
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        });
+      } catch (logErr) {
+        console.error('Failed to log unbound webhook:', logErr);
+      }
+
       return res.json({
-        message: 'No active workflows connected to this GitHub repository or token.',
-        repository: repoFullName,
+        message: 'GitHub Webhook received & logged in DB, but no active matching workflow was found.',
+        repository: rawRepoName,
         branch,
+        commitMsg,
+        author,
       });
     }
 
@@ -62,7 +132,7 @@ router.post('/github-webhook', async (req: Request, res: Response) => {
     const io = req.app.get('io');
 
     for (const wf of matchingWorkflows) {
-      // Check branch matching if branch is specified
+      // Check branch matching if branch is specified (and not wildcard '*')
       if (wf.githubBranch && wf.githubBranch !== '*' && wf.githubBranch.toLowerCase() !== branch.toLowerCase()) {
         continue;
       }
@@ -73,16 +143,17 @@ router.post('/github-webhook', async (req: Request, res: Response) => {
       wf.lastRunStatus = 'pending';
       await wf.save();
 
-      // Trigger workflow execution with commit metadata & email options!
+      // Trigger workflow execution with complete commit metadata
       runWorkflowExecution(wf._id.toString(), {
         io,
         targetRoom: `workflow:${wf._id}`,
-        triggerSource,
+        triggerSource: 'github_commit',
         commitInfo: {
           commitMsg,
           author,
           authorEmail,
-          repo: repoFullName,
+          commitHash,
+          repo: rawRepoName || wf.githubRepo,
           branch,
         },
       });
@@ -92,7 +163,7 @@ router.post('/github-webhook', async (req: Request, res: Response) => {
     res.json({
       message: `Triggered ${triggeredIds.length} workflow(s) automatically via GitHub Push`,
       triggeredWorkflowIds: triggeredIds,
-      repository: repoFullName,
+      repository: rawRepoName,
       branch,
       commitMsg,
       author,

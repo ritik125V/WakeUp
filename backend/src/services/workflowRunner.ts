@@ -13,6 +13,7 @@ export interface IExecutionOptions {
     commitMsg?: string;
     author?: string;
     authorEmail?: string;
+    commitHash?: string;
     repo?: string;
     branch?: string;
   };
@@ -254,209 +255,20 @@ export async function runWorkflowExecution(
   const stepLogs: IStepLogTelemetry[] = [];
   const startTimeTotal = Date.now();
 
-  if (io) {
-    io.to(room).emit('workflow:started', {
-      workflowId,
-      workflowName: workflow.name,
-      totalSteps: workflow.steps.length,
-      startedAt: new Date().toISOString(),
-    });
-  }
+  let totalTimeMs = 0;
+  let successSteps = 0;
+  let failedSteps = 0;
+  let overallStatus: 'PASSED' | 'FAILED' | 'RUNNING' = 'RUNNING';
 
-  for (let idx = 0; idx < workflow.steps.length; idx++) {
-    const step: IWorkflowStep = workflow.steps[idx];
-
-    // Check if step is skipped
-    if (step.skipped === true) {
-      const skippedTelemetry: IStepLogTelemetry = {
-        stepIndex: idx + 1,
-        stepId: step.stepId,
-        stepName: step.name,
-        method: step.method,
-        url: step.url,
-        requestHeaders: step.headers || {},
-        latencyMs: 0,
-        status: 'skipped',
-        errorMessage: 'Step skipped by user preference',
-        timestamp: new Date().toISOString(),
-      };
-      stepLogs.push(skippedTelemetry);
-      if (io) io.to(room).emit('workflow:step_completed', skippedTelemetry);
-      continue;
-    }
-
-    const stepStartTime = Date.now();
-
-    // 1. Interpolate variables in URL, headers, params, body
-    const finalUrl = interpolateVariables(step.url, variablesMap);
-
-    // Process query params
-    const rawParams = step.queryParams || {};
-    const finalParams: Record<string, string> = {};
-    for (const [k, v] of Object.entries(rawParams)) {
-      finalParams[interpolateVariables(k, variablesMap)] = interpolateVariables(v, variablesMap);
-    }
-
-    // Process headers
-    const rawHeaders = step.headers || {};
-    const finalHeaders: Record<string, string> = {};
-    for (const [k, v] of Object.entries(rawHeaders)) {
-      finalHeaders[interpolateVariables(k, variablesMap)] = interpolateVariables(v, variablesMap);
-    }
-
-    // Pass carried cookies
-    if (step.carryCookies !== false && Object.keys(cookieJar).length > 0) {
-      const cookieStr = Object.entries(cookieJar)
-        .map(([k, v]) => `${k}=${v}`)
-        .join('; ');
-      finalHeaders['Cookie'] = cookieStr;
-    }
-
-    // Process body payload
-    let finalBody: any = undefined;
-    if (step.bodyPayload && step.bodyPayload.trim() !== '') {
-      const interpolatedBodyStr = interpolateVariables(step.bodyPayload, variablesMap);
-      try {
-        finalBody = JSON.parse(interpolatedBodyStr);
-      } catch {
-        finalBody = interpolatedBodyStr;
-      }
-    }
-
-    const stepTelemetry: IStepLogTelemetry = {
-      stepIndex: idx + 1,
-      stepId: step.stepId,
-      stepName: step.name,
-      method: step.method,
-      url: finalUrl,
-      requestHeaders: finalHeaders,
-      requestBody: typeof finalBody === 'object' ? JSON.stringify(finalBody) : finalBody,
-      latencyMs: 0,
-      status: 'success',
-      timestamp: new Date().toISOString(),
-    };
-
-    const isLocalhost =
-      finalUrl.includes('localhost') ||
-      finalUrl.includes('127.0.0.1') ||
-      finalUrl.includes('0.0.0.0') ||
-      finalUrl.includes('::1');
-
-    if (isLocalhost) {
-      const latencyMs = Date.now() - stepStartTime;
-      stepTelemetry.latencyMs = latencyMs;
-      stepTelemetry.status = 'failed';
-      stepTelemetry.statusCode = 0;
-      stepTelemetry.errorMessage = `Cannot reach user's local machine (${finalUrl}) from cloud server on Render. Local machine endpoints (http://localhost:xxx) must be executed directly in the browser via the WakeUp web app.`;
-      stepLogs.push(stepTelemetry);
-      if (io) io.to(room).emit('workflow:step_completed', stepTelemetry);
-      continue;
-    }
-
-    try {
-      const response = await axios({
-        method: step.method,
-        url: finalUrl,
-        params: finalParams,
-        headers: finalHeaders,
-        data: finalBody,
-        validateStatus: () => true,
-        timeout: 15000,
-      });
-
-      const latencyMs = Date.now() - stepStartTime;
-      stepTelemetry.latencyMs = latencyMs;
-      stepTelemetry.statusCode = response.status;
-      stepTelemetry.responseHeaders = response.headers as Record<string, any>;
-      stepTelemetry.responseBody = response.data;
-
-      // Capture cookies if set
-      if (step.captureCookies !== false) {
-        const setCookieHeader = response.headers['set-cookie'];
-        if (setCookieHeader) {
-          const newCookies = parseSetCookieHeaders(setCookieHeader);
-          Object.assign(cookieJar, newCookies);
-          stepTelemetry.capturedCookies = newCookies;
-        }
-      }
-
-      // Extract variables if defined
-      if (step.extractVariables && Array.isArray(step.extractVariables)) {
-        const extracted: Record<string, string> = {};
-        for (const ext of step.extractVariables) {
-          if (!ext.varName) continue;
-          let val: any = undefined;
-
-          if (typeof response.data === 'object' && response.data !== null) {
-            val = getValueByPath(response.data, ext.jsonPath);
-          } else if (typeof response.data === 'string') {
-            try {
-              const jsonParsed = JSON.parse(response.data);
-              val = getValueByPath(jsonParsed, ext.jsonPath);
-            } catch {
-              val = response.data;
-            }
-          }
-
-          if (val !== undefined && val !== null) {
-            const valStr = typeof val === 'object' ? JSON.stringify(val) : String(val);
-            variablesMap[ext.varName] = valStr;
-            extracted[ext.varName] = valStr;
-          }
-        }
-        if (Object.keys(extracted).length > 0) {
-          stepTelemetry.extractedVars = extracted;
-        }
-      }
-
-      // Validate expected status code
-      const expectedStatus = step.expectedStatusCode || 200;
-      const isStatusSuccess =
-        response.status === expectedStatus ||
-        (expectedStatus === 200 && response.status === 201) ||
-        (expectedStatus === 201 && response.status === 200) ||
-        (response.status >= 200 && response.status < 300 && (!step.expectedStatusCode || step.expectedStatusCode === 200));
-
-      if (!isStatusSuccess) {
-        stepTelemetry.status = 'failed';
-        stepTelemetry.errorMessage = `Status code mismatch: Expected ${expectedStatus}, received ${response.status}`;
-      }
-    } catch (err: any) {
-      const latencyMs = Date.now() - stepStartTime;
-      stepTelemetry.latencyMs = latencyMs;
-      stepTelemetry.status = 'error';
-      stepTelemetry.errorMessage = err?.message || 'Network / execution error';
-    }
-
-    stepLogs.push(stepTelemetry);
-    if (io) io.to(room).emit('workflow:step_completed', stepTelemetry);
-
-    // Short gap between steps for smooth websocket UX stream
-    await new Promise((resolve) => setTimeout(resolve, 300));
-  }
-
-  const totalTimeMs = Date.now() - startTimeTotal;
-  const successSteps = stepLogs.filter((s) => s.status === 'success').length;
-  const failedSteps = stepLogs.filter((s) => s.status === 'failed' || s.status === 'error').length;
-  const overallStatus = failedSteps === 0 ? 'success' : 'failed';
-
-  try {
-    await WorkflowModel.updateOne(
-      { _id: workflowId },
-      {
-        $set: {
-          lastRunStatus: overallStatus,
-          lastTriggeredAt: new Date(),
-        },
-      }
-    );
-
-    // Persist full execution run report to DB
-    const runSource = triggerSource?.includes('GitHub') || commitInfo?.repo
+  const runSource: 'github_commit' | 'manual' | 'browser_direct' | 'api' =
+    triggerSource?.includes('GitHub') || commitInfo?.repo
       ? 'github_commit'
       : (triggerSource as any) || 'manual';
 
-    await WorkflowRunModel.create({
+  // Create initial MongoDB WorkflowRun document IMMEDIATELY when execution starts
+  let runDoc: any = null;
+  try {
+    runDoc = await WorkflowRunModel.create({
       workflowId: workflow._id,
       userId: workflow.userId,
       workflowName: workflow.name,
@@ -466,17 +278,254 @@ export async function runWorkflowExecution(
       commitInfo: commitInfo || {},
       summary: {
         totalSteps: workflow.steps.length,
-        successSteps,
-        failedSteps,
-        totalTimeMs,
-        overallStatus,
+        successSteps: 0,
+        failedSteps: 0,
+        totalTimeMs: 0,
+        overallStatus: 'RUNNING',
         startedAt: new Date(startTimeTotal),
-        finishedAt: new Date(),
+        finishedAt: new Date(startTimeTotal),
       },
-      stepLogs,
+      stepLogs: [],
     });
-  } catch (err) {
-    console.error('Failed to update workflow run status & save run report:', err);
+  } catch (createErr) {
+    console.error('Failed to create initial WorkflowRun document:', createErr);
+  }
+
+  if (io) {
+    io.to(room).emit('workflow:started', {
+      workflowId,
+      workflowName: workflow.name,
+      totalSteps: workflow.steps.length,
+      startedAt: new Date().toISOString(),
+      runId: runDoc?._id?.toString(),
+    });
+  }
+
+  try {
+    for (let idx = 0; idx < workflow.steps.length; idx++) {
+      const step: IWorkflowStep = workflow.steps[idx];
+
+      // Check if step is skipped
+      if (step.skipped === true) {
+        const skippedTelemetry: IStepLogTelemetry = {
+          stepIndex: idx + 1,
+          stepId: step.stepId,
+          stepName: step.name,
+          method: step.method,
+          url: step.url,
+          requestHeaders: step.headers || {},
+          latencyMs: 0,
+          status: 'skipped',
+          errorMessage: 'Step skipped by user preference',
+          timestamp: new Date().toISOString(),
+        };
+        stepLogs.push(skippedTelemetry);
+        if (io) io.to(room).emit('workflow:step_completed', skippedTelemetry);
+        continue;
+      }
+
+      const stepStartTime = Date.now();
+
+      // 1. Interpolate variables in URL, headers, params, body
+      const finalUrl = interpolateVariables(step.url, variablesMap);
+
+      // Process query params
+      const rawParams = step.queryParams || {};
+      const finalParams: Record<string, string> = {};
+      for (const [k, v] of Object.entries(rawParams)) {
+        finalParams[interpolateVariables(k, variablesMap)] = interpolateVariables(v, variablesMap);
+      }
+
+      // Process headers
+      const rawHeaders = step.headers || {};
+      const finalHeaders: Record<string, string> = {};
+      for (const [k, v] of Object.entries(rawHeaders)) {
+        finalHeaders[interpolateVariables(k, variablesMap)] = interpolateVariables(v, variablesMap);
+      }
+
+      // Pass carried cookies
+      if (step.carryCookies !== false && Object.keys(cookieJar).length > 0) {
+        const cookieStr = Object.entries(cookieJar)
+          .map(([k, v]) => `${k}=${v}`)
+          .join('; ');
+        finalHeaders['Cookie'] = cookieStr;
+      }
+
+      // Process body payload
+      let finalBody: any = undefined;
+      if (step.bodyPayload && step.bodyPayload.trim() !== '') {
+        const interpolatedBodyStr = interpolateVariables(step.bodyPayload, variablesMap);
+        try {
+          finalBody = JSON.parse(interpolatedBodyStr);
+        } catch {
+          finalBody = interpolatedBodyStr;
+        }
+      }
+
+      const stepTelemetry: IStepLogTelemetry = {
+        stepIndex: idx + 1,
+        stepId: step.stepId,
+        stepName: step.name,
+        method: step.method,
+        url: finalUrl,
+        requestHeaders: finalHeaders,
+        requestBody: typeof finalBody === 'object' ? JSON.stringify(finalBody) : finalBody,
+        latencyMs: 0,
+        status: 'success',
+        timestamp: new Date().toISOString(),
+      };
+
+      const isLocalhost =
+        finalUrl.includes('localhost') ||
+        finalUrl.includes('127.0.0.1') ||
+        finalUrl.includes('0.0.0.0') ||
+        finalUrl.includes('::1');
+
+      if (isLocalhost) {
+        const latencyMs = Date.now() - stepStartTime;
+        stepTelemetry.latencyMs = latencyMs;
+        stepTelemetry.status = 'failed';
+        stepTelemetry.statusCode = 0;
+        stepTelemetry.errorMessage = `Cannot reach user's local machine (${finalUrl}) from cloud server on Render. Local machine endpoints (http://localhost:xxx) must be executed directly in the browser via the WakeUp web app.`;
+        stepLogs.push(stepTelemetry);
+        if (io) io.to(room).emit('workflow:step_completed', stepTelemetry);
+        continue;
+      }
+
+      try {
+        const response = await axios({
+          method: step.method,
+          url: finalUrl,
+          params: finalParams,
+          headers: finalHeaders,
+          data: finalBody,
+          validateStatus: () => true,
+          timeout: 15000,
+        });
+
+        const latencyMs = Date.now() - stepStartTime;
+        stepTelemetry.latencyMs = latencyMs;
+        stepTelemetry.statusCode = response.status;
+        stepTelemetry.responseHeaders = response.headers as Record<string, any>;
+        stepTelemetry.responseBody = response.data;
+
+        // Capture cookies if set
+        if (step.captureCookies !== false) {
+          const setCookieHeader = response.headers['set-cookie'];
+          if (setCookieHeader) {
+            const newCookies = parseSetCookieHeaders(setCookieHeader);
+            Object.assign(cookieJar, newCookies);
+            stepTelemetry.capturedCookies = newCookies;
+          }
+        }
+
+        // Extract variables if defined
+        if (step.extractVariables && Array.isArray(step.extractVariables)) {
+          const extracted: Record<string, string> = {};
+          for (const ext of step.extractVariables) {
+            if (!ext.varName) continue;
+            let val: any = undefined;
+
+            if (typeof response.data === 'object' && response.data !== null) {
+              val = getValueByPath(response.data, ext.jsonPath);
+            } else if (typeof response.data === 'string') {
+              try {
+                const jsonParsed = JSON.parse(response.data);
+                val = getValueByPath(jsonParsed, ext.jsonPath);
+              } catch {
+                val = response.data;
+              }
+            }
+
+            if (val !== undefined && val !== null) {
+              const valStr = typeof val === 'object' ? JSON.stringify(val) : String(val);
+              variablesMap[ext.varName] = valStr;
+              extracted[ext.varName] = valStr;
+            }
+          }
+          if (Object.keys(extracted).length > 0) {
+            stepTelemetry.extractedVars = extracted;
+          }
+        }
+
+        // Validate expected status code
+        const expectedStatus = step.expectedStatusCode || 200;
+        const isStatusSuccess =
+          response.status === expectedStatus ||
+          (expectedStatus === 200 && response.status === 201) ||
+          (expectedStatus === 201 && response.status === 200) ||
+          (response.status >= 200 && response.status < 300 && (!step.expectedStatusCode || step.expectedStatusCode === 200));
+
+        if (!isStatusSuccess) {
+          stepTelemetry.status = 'failed';
+          stepTelemetry.errorMessage = `Status code mismatch: Expected ${expectedStatus}, received ${response.status}`;
+        }
+      } catch (err: any) {
+        const latencyMs = Date.now() - stepStartTime;
+        stepTelemetry.latencyMs = latencyMs;
+        stepTelemetry.status = 'error';
+        stepTelemetry.errorMessage = err?.message || 'Network / execution error';
+      }
+
+      stepLogs.push(stepTelemetry);
+      if (io) io.to(room).emit('workflow:step_completed', stepTelemetry);
+
+      // Short gap between steps for smooth websocket UX stream
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  } finally {
+    totalTimeMs = Date.now() - startTimeTotal;
+    successSteps = stepLogs.filter((s) => s.status === 'success').length;
+    failedSteps = stepLogs.filter((s) => s.status === 'failed' || s.status === 'error').length;
+    overallStatus = failedSteps === 0 ? 'PASSED' : 'FAILED';
+
+    try {
+      if (runDoc) {
+        runDoc.summary = {
+          totalSteps: workflow.steps.length,
+          successSteps,
+          failedSteps,
+          totalTimeMs,
+          overallStatus,
+          startedAt: new Date(startTimeTotal),
+          finishedAt: new Date(),
+        };
+        runDoc.stepLogs = stepLogs;
+        await runDoc.save();
+      } else {
+        runDoc = await WorkflowRunModel.create({
+          workflowId: workflow._id,
+          userId: workflow.userId,
+          workflowName: workflow.name,
+          triggerSource: runSource,
+          githubRepo: commitInfo?.repo || workflow.githubRepo || '',
+          githubBranch: commitInfo?.branch || workflow.githubBranch || 'main',
+          commitInfo: commitInfo || {},
+          summary: {
+            totalSteps: workflow.steps.length,
+            successSteps,
+            failedSteps,
+            totalTimeMs,
+            overallStatus,
+            startedAt: new Date(startTimeTotal),
+            finishedAt: new Date(),
+          },
+          stepLogs,
+        });
+      }
+
+      await WorkflowModel.updateOne(
+        { _id: workflowId },
+        {
+          $set: {
+            lastRunStatus: overallStatus.toLowerCase(),
+            lastTriggeredAt: new Date(),
+          },
+        }
+      );
+    } catch (err) {
+      console.error('Failed to update workflow run status & save run report:', err);
+    }
   }
 
   if (io) {

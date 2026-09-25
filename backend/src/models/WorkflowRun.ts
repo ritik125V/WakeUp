@@ -15,7 +15,7 @@ export interface IWorkflowRunSummary {
   successSteps: number;
   failedSteps: number;
   totalTimeMs: number;
-  overallStatus: 'success' | 'failed';
+  overallStatus: 'success' | 'failed' | 'PASSED' | 'FAILED' | 'RUNNING' | 'PENDING' | 'UNBOUND_WEBHOOK';
   startedAt: Date;
   finishedAt: Date;
 }
@@ -25,7 +25,7 @@ export interface IWorkflowRun extends Document {
   workflowId: Types.ObjectId | string;
   userId: string;
   workflowName: string;
-  triggerSource: 'github_commit' | 'manual' | 'browser_direct' | 'api';
+  triggerSource: 'github_commit' | 'manual' | 'browser_direct' | 'api' | 'unbound_webhook';
   githubRepo?: string;
   githubBranch?: string;
   commitInfo?: ICommitInfo;
@@ -53,7 +53,12 @@ const workflowRunSummarySchema = new Schema<IWorkflowRunSummary>(
     successSteps: { type: Number, required: true, default: 0 },
     failedSteps: { type: Number, required: true, default: 0 },
     totalTimeMs: { type: Number, required: true, default: 0 },
-    overallStatus: { type: String, enum: ['success', 'failed'], required: true },
+    overallStatus: {
+      type: String,
+      enum: ['success', 'failed', 'PASSED', 'FAILED', 'RUNNING', 'PENDING', 'UNBOUND_WEBHOOK'],
+      required: true,
+      default: 'RUNNING',
+    },
     startedAt: { type: Date, required: true, default: Date.now },
     finishedAt: { type: Date, required: true, default: Date.now },
   },
@@ -67,7 +72,7 @@ const workflowRunSchema = new Schema<IWorkflowRun>(
     workflowName: { type: String, required: true },
     triggerSource: {
       type: String,
-      enum: ['github_commit', 'manual', 'browser_direct', 'api'],
+      enum: ['github_commit', 'manual', 'browser_direct', 'api', 'unbound_webhook'],
       default: 'manual',
     },
     githubRepo: { type: String, default: '' },
