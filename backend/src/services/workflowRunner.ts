@@ -126,6 +126,23 @@ export async function executeSingleStepTest(
     timestamp: new Date().toISOString(),
   };
 
+  const isLocalhost =
+    finalUrl.includes('localhost') ||
+    finalUrl.includes('127.0.0.1') ||
+    finalUrl.includes('0.0.0.0') ||
+    finalUrl.includes('::1');
+
+  if (isLocalhost) {
+    const latencyMs = Date.now() - stepStartTime;
+    return {
+      ...stepTelemetry,
+      latencyMs,
+      status: 'error',
+      statusCode: 0,
+      errorMessage: `Cannot reach user's local machine (${finalUrl}) from cloud server on Render. Local machine endpoints (http://localhost:xxx) must be executed directly in the browser via the WakeUp web app.`,
+    };
+  }
+
   try {
     const response = await axios({
       method: step.method,
@@ -317,6 +334,23 @@ export async function runWorkflowExecution(
       status: 'success',
       timestamp: new Date().toISOString(),
     };
+
+    const isLocalhost =
+      finalUrl.includes('localhost') ||
+      finalUrl.includes('127.0.0.1') ||
+      finalUrl.includes('0.0.0.0') ||
+      finalUrl.includes('::1');
+
+    if (isLocalhost) {
+      const latencyMs = Date.now() - stepStartTime;
+      stepTelemetry.latencyMs = latencyMs;
+      stepTelemetry.status = 'failed';
+      stepTelemetry.statusCode = 0;
+      stepTelemetry.errorMessage = `Cannot reach user's local machine (${finalUrl}) from cloud server on Render. Local machine endpoints (http://localhost:xxx) must be executed directly in the browser via the WakeUp web app.`;
+      stepLogs.push(stepTelemetry);
+      if (io) io.to(room).emit('workflow:step_completed', stepTelemetry);
+      continue;
+    }
 
     try {
       const response = await axios({

@@ -73,6 +73,8 @@ import {
   IWorkflowStepData,
   IWorkflowVariableExtract,
 } from '@/lib/api';
+import { ApiResponseDrawer } from '@/components/ApiResponseDrawer';
+import { AiSpecImportModal } from '@/components/AiSpecImportModal';
 import {
   generateWorkflowPDFReport,
   openWorkflowPDFInNewTab,
@@ -355,6 +357,13 @@ export default function WorkflowDetailPage() {
   const [isImportingSteps, setIsImportingSteps] = useState<boolean>(false);
   const [scannerStatusMsg, setScannerStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [scannerSourceTab, setScannerSourceTab] = useState<'github' | 'local'>('github');
+  // AI Spec & Autocomplete Dropdown State
+  const [isAiSpecModalOpen, setIsAiSpecModalOpen] = useState<boolean>(false);
+  const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
+  const [isUrlDropdownOpen, setIsUrlDropdownOpen] = useState<boolean>(false);
+  // Bulk Base URL Override State (Frontend Only)
+  const [globalBaseUrl, setGlobalBaseUrl] = useState<string>('http://localhost:5000');
+  const [isBaseUrlPopoverOpen, setIsBaseUrlPopoverOpen] = useState<boolean>(false);
 
   const handleLocalFilesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -428,6 +437,57 @@ export default function WorkflowDetailPage() {
     } finally {
       setIsScanningEndpoints(false);
     }
+  };
+
+  const handleImportAiSpec = (parsed: any) => {
+    if (!workflow || !parsed.steps || parsed.steps.length === 0) return;
+
+    const updatedSteps = [...parsed.steps];
+    setWorkflow({
+      ...workflow,
+      name: parsed.workflowName && parsed.workflowName !== 'AI Generated API Workflow' ? parsed.workflowName : workflow.name,
+      steps: updatedSteps,
+    });
+    setActiveStepIndex(0);
+
+    if (parsed.suggestions && parsed.suggestions.length > 0) {
+      setAiSuggestions(parsed.suggestions);
+    }
+
+    const endpointsFromSpec: IScannedEndpoint[] = parsed.steps.map((s: any) => ({
+      method: s.method,
+      path: s.url.replace(/^https?:\/\/[^\/]+/, '') || s.url,
+      sourceFile: 'AI Spec (wakeup_spec.md)',
+      line: 1,
+      framework: 'AI Spec',
+      suggestedBody: s.bodyPayload,
+      expectedStatus: s.expectedStatusCode || 200,
+    }));
+    setScannedEndpoints((prev) => [...endpointsFromSpec, ...prev]);
+  };
+
+  const handleApplyBulkBaseUrl = () => {
+    if (!workflow || !globalBaseUrl.trim()) return;
+
+    const cleanBase = globalBaseUrl.trim().replace(/\/$/, '');
+    const updatedSteps = workflow.steps.map((step) => {
+      let rawUrl = (step.url || '').trim();
+
+      // Cleanly strip any existing origin or host template (http://..., https://..., {{baseUrl}}, {{host}})
+      let pathOnly = rawUrl
+        .replace(/^https?:\/\/[^\/]+/, '')
+        .replace(/^\{\{\s*[\w.-]+\s*\}\}/, '');
+
+      if (!pathOnly.startsWith('/')) {
+        pathOnly = '/' + pathOnly;
+      }
+
+      const newUrl = `${cleanBase}${pathOnly}`;
+      return { ...step, url: newUrl };
+    });
+
+    setWorkflow({ ...workflow, steps: updatedSteps });
+    setIsBaseUrlPopoverOpen(false);
   };
 
   const handleOpenScanner = () => {
@@ -987,10 +1047,92 @@ export default function WorkflowDetailPage() {
             <span className="px-2 py-0.5 bg-neutral-900 text-rose-300 text-[10px] rounded font-bold flex-shrink-0 border border-white/5">
               {workflow.steps.length} Steps
             </span>
+
+            {/* Global Base URL Override Control */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsBaseUrlPopoverOpen(!isBaseUrlPopoverOpen)}
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 text-[10px] rounded font-bold transition-all cursor-pointer border border-purple-500/30"
+                title="Change Base URL across all workflow steps in 1 click"
+              >
+                <Globe className="w-3 h-3 text-purple-400" />
+                <span className="truncate max-w-[130px]">Base URL: {globalBaseUrl}</span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${isBaseUrlPopoverOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              <AnimatePresence>
+                {isBaseUrlPopoverOpen && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setIsBaseUrlPopoverOpen(false)} />
+                    <motion.div
+                      initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute left-0 mt-2 w-72 bg-neutral-950 rounded-xl p-3 shadow-2xl z-30 font-mono text-xs space-y-3 border border-white/10 select-none"
+                    >
+                      <div className="flex items-center justify-between border-b border-neutral-900 pb-2">
+                        <span className="font-bold text-white text-xs flex items-center gap-1.5">
+                          <Globe className="w-3.5 h-3.5 text-purple-400" /> Bulk Base URL Override
+                        </span>
+                        <span className="text-[9px] text-neutral-400">Frontend Only</span>
+                      </div>
+
+                      <p className="text-[10px] text-neutral-400 leading-relaxed">
+                        Switch target server port or environment host across all {workflow.steps.length} workflow steps in 1 click:
+                      </p>
+
+                      <div className="space-y-1.5">
+                        <input
+                          type="text"
+                          value={globalBaseUrl}
+                          onChange={(e) => setGlobalBaseUrl(e.target.value)}
+                          placeholder="e.g. http://localhost:5000"
+                          className="w-full bg-neutral-900 text-xs font-mono text-emerald-400 px-3 py-1.5 rounded-lg border border-white/10 focus:outline-none focus:border-purple-400"
+                        />
+
+                        {/* Presets */}
+                        <div className="flex flex-wrap gap-1">
+                          {['http://localhost:3000', 'http://localhost:5000', 'http://localhost:8000', 'http://127.0.0.1:5001'].map((preset) => (
+                            <button
+                              key={preset}
+                              type="button"
+                              onClick={() => setGlobalBaseUrl(preset)}
+                              className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 text-purple-300 text-[9px] rounded font-bold transition-colors cursor-pointer border-none"
+                            >
+                              {preset}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleApplyBulkBaseUrl}
+                        className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-lg transition-all shadow-md cursor-pointer border-none flex items-center justify-center gap-1.5"
+                      >
+                        <Zap className="w-3.5 h-3.5 fill-current" />
+                        <span>Apply to All {workflow.steps.length} Steps</span>
+                      </button>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Prominent Direct AI Agent Spec Import Button */}
+          <button
+            onClick={() => setIsAiSpecModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-950/80 hover:bg-rose-900 text-rose-300 text-xs font-bold rounded-lg border border-rose-500/30 transition-all cursor-pointer shadow-md"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-rose-400" />
+            <span>AI Agent Import (.md)</span>
+          </button>
+
           {/* Dropdown 1: Code & Triggers */}
           <div className="relative">
             <button
@@ -1024,11 +1166,25 @@ export default function WorkflowDetailPage() {
                     <button
                       onClick={() => {
                         setIsTriggersMenuOpen(false);
+                        setIsAiSpecModalOpen(true);
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-rose-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                    >
+                      <Sparkles className="w-4 h-4 text-rose-400 shrink-0" />
+                      <div>
+                        <div className="text-xs text-white font-bold">Import via AI Agent (.md)</div>
+                        <div className="text-[10px] text-neutral-400 font-normal">Generate steps from local AI spec</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setIsTriggersMenuOpen(false);
                         handleOpenScanner();
                       }}
                       className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-purple-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
                     >
-                      <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
+                      <Code className="w-4 h-4 text-purple-400 shrink-0" />
                       <div>
                         <div className="text-xs text-white font-bold">Scan Code Endpoints</div>
                         <div className="text-[10px] text-neutral-400 font-normal">Extract routes from GitHub or local files</div>
@@ -1343,13 +1499,106 @@ export default function WorkflowDetailPage() {
                   <option value="HEAD">HEAD</option>
                 </select>
 
-                <input
-                  type="text"
-                  placeholder="https://api.example.com/v1/endpoint"
-                  value={currentStep.url}
-                  onChange={(e) => updateCurrentStep({ url: e.target.value })}
-                  className="w-full bg-neutral-900 text-xs text-white px-3 py-2 rounded-lg border border-white/10 focus:outline-none focus:border-rose-400 min-w-0 flex-1 font-mono"
-                />
+                <div className="relative w-full flex-1 min-w-0">
+                  <input
+                    type="text"
+                    placeholder="http://localhost:5000/api/v1/endpoint"
+                    value={currentStep.url}
+                    onFocus={() => setIsUrlDropdownOpen(true)}
+                    onChange={(e) => {
+                      updateCurrentStep({ url: e.target.value });
+                      setIsUrlDropdownOpen(true);
+                    }}
+                    className="w-full bg-neutral-900 text-xs text-white px-3 py-2 rounded-lg border border-white/10 focus:outline-none focus:border-rose-400 min-w-0 flex-1 font-mono"
+                  />
+
+                  {/* Interactive Sleek Autocomplete Overlay Dropdown */}
+                  {isUrlDropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setIsUrlDropdownOpen(false)} />
+                      <div className="absolute left-0 top-full mt-1.5 w-full bg-neutral-950/95 backdrop-blur-md rounded-xl p-2.5 shadow-2xl z-20 border border-white/10 space-y-2 max-h-64 overflow-y-auto font-mono text-xs">
+                        <div className="text-[10px] text-neutral-400 font-bold px-1 uppercase tracking-wider flex items-center justify-between">
+                          <span className="flex items-center gap-1">
+                            <Sparkles className="w-3 h-3 text-purple-400" /> Host & Endpoint Suggestions:
+                          </span>
+                          <span className="text-[9px] opacity-60">Click item to fill</span>
+                        </div>
+
+                        {/* Presets */}
+                        <div className="flex flex-wrap gap-1">
+                          {['http://localhost:3000', 'http://localhost:5000', 'http://localhost:8000', '{{baseUrl}}'].map((host) => (
+                            <button
+                              key={host}
+                              type="button"
+                              onClick={() => {
+                                const cleanHost = host.replace(/\/$/, '');
+                                if (!currentStep.url || currentStep.url.startsWith('/')) {
+                                  updateCurrentStep({ url: `${cleanHost}${currentStep.url.startsWith('/') ? '' : '/'}${currentStep.url}` });
+                                } else {
+                                  try {
+                                    const urlObj = new URL(currentStep.url);
+                                    updateCurrentStep({ url: `${cleanHost}${urlObj.pathname}${urlObj.search}` });
+                                  } catch {
+                                    const pathPart = currentStep.url.replace(/^https?:\/\/[^\/]+/, '');
+                                    updateCurrentStep({ url: `${cleanHost}${pathPart.startsWith('/') ? '' : '/'}${pathPart}` });
+                                  }
+                                }
+                                setIsUrlDropdownOpen(false);
+                              }}
+                              className="px-2 py-1 bg-neutral-900 hover:bg-neutral-800 text-purple-300 rounded text-[10px] font-bold transition-colors cursor-pointer border-none"
+                            >
+                              {host}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Scanned & AI Spec Endpoints */}
+                        {scannedEndpoints.length > 0 && (
+                          <div className="space-y-1 pt-1.5 border-t border-neutral-900">
+                            {scannedEndpoints
+                              .filter((ep) => !currentStep.url || ep.path.toLowerCase().includes(currentStep.url.toLowerCase()) || ep.method.toLowerCase().includes(currentStep.url.toLowerCase()))
+                              .slice(0, 10)
+                              .map((ep, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => {
+                                    let host = 'http://localhost:5000';
+                                    try {
+                                      if (currentStep.url && currentStep.url.startsWith('http')) {
+                                        host = new URL(currentStep.url).origin;
+                                      }
+                                    } catch {}
+                                    const path = ep.path.startsWith('/') ? ep.path : `/${ep.path}`;
+                                    updateCurrentStep({
+                                      method: ep.method,
+                                      url: `${host}${path}`,
+                                      bodyPayload: ep.suggestedBody || currentStep.bodyPayload,
+                                    });
+                                    setIsUrlDropdownOpen(false);
+                                  }}
+                                  className="w-full text-left px-2.5 py-1.5 hover:bg-neutral-900 rounded-lg flex items-center justify-between transition-colors text-[11px] cursor-pointer border-none"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                      ep.method === 'POST' ? 'bg-amber-950 text-amber-300' :
+                                      ep.method === 'PUT' ? 'bg-sky-950 text-sky-300' :
+                                      ep.method === 'DELETE' ? 'bg-rose-950 text-rose-300' :
+                                      'bg-emerald-950 text-emerald-400'
+                                    }`}>
+                                      {ep.method}
+                                    </span>
+                                    <span className="text-white font-bold">{ep.path}</span>
+                                  </div>
+                                  <span className="text-[10px] text-neutral-400">{ep.framework || 'Route'}</span>
+                                </button>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
 
               <div className="flex items-center gap-2 text-xs text-neutral-400 whitespace-nowrap justify-between sm:justify-end flex-shrink-0 pt-1 sm:pt-0">
@@ -1365,108 +1614,51 @@ export default function WorkflowDetailPage() {
               </div>
             </div>
 
-            {/* Interactive URL & Scanned Endpoint Autocomplete Strip */}
-            <div className="flex items-center gap-1.5 flex-wrap text-[10px] select-none pt-1">
-              <span className="text-neutral-400 font-bold flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-purple-400" /> Host Presets:
-              </span>
-              {['http://localhost:3000', 'http://localhost:5000', 'http://localhost:8000', 'http://localhost:8080', '{{baseUrl}}'].map((host) => (
-                <button
-                  key={host}
-                  type="button"
-                  onClick={() => {
-                    const cleanHost = host.replace(/\/$/, '');
-                    if (!currentStep.url || currentStep.url.startsWith('/')) {
-                      updateCurrentStep({ url: `${cleanHost}${currentStep.url.startsWith('/') ? '' : '/'}${currentStep.url}` });
-                    } else {
-                      try {
-                        const urlObj = new URL(currentStep.url);
-                        updateCurrentStep({ url: `${cleanHost}${urlObj.pathname}${urlObj.search}` });
-                      } catch {
-                        const pathPart = currentStep.url.replace(/^https?:\/\/[^\/]+/, '');
-                        updateCurrentStep({ url: `${cleanHost}${pathPart.startsWith('/') ? '' : '/'}${pathPart}` });
-                      }
-                    }
-                  }}
-                  className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 text-purple-300 rounded border border-white/5 cursor-pointer font-mono"
-                >
-                  {host}
-                </button>
-              ))}
-
-              {scannedEndpoints.length > 0 && (
-                <div className="flex items-center gap-1.5 flex-wrap pl-2 border-l border-neutral-800">
-                  <span className="text-neutral-300 font-bold flex items-center gap-1">
-                    <Code className="w-3 h-3 text-emerald-400" /> Scanned Code Routes:
+            {/* AI Codebase Suggestions & Upgrade Banner */}
+            {aiSuggestions.length > 0 && (
+              <div className="p-3.5 bg-amber-950/40 rounded-xl space-y-2 border-none font-mono text-xs my-2 select-none">
+                <div className="flex items-center justify-between text-amber-300 font-bold">
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-amber-400" /> AI Codebase Insights & System Upgrades ({aiSuggestions.length})
                   </span>
-                  {scannedEndpoints.slice(0, 6).map((ep, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => {
-                        let host = 'http://localhost:5000';
-                        try {
-                          if (currentStep.url && currentStep.url.startsWith('http')) {
-                            const urlObj = new URL(currentStep.url);
-                            host = urlObj.origin;
-                          }
-                        } catch {}
-                        const path = ep.path.startsWith('/') ? ep.path : `/${ep.path}`;
-                        updateCurrentStep({
-                          method: ep.method,
-                          url: `${host}${path}`,
-                          bodyPayload: ep.suggestedBody || currentStep.bodyPayload,
-                        });
-                      }}
-                      className="px-2 py-0.5 bg-purple-950/80 hover:bg-purple-900 text-purple-200 rounded border border-purple-500/30 cursor-pointer font-mono flex items-center gap-1"
-                    >
-                      <span className="text-[9px] font-bold text-emerald-400">{ep.method}</span>
-                      <span>{ep.path}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Quick Single Step Test Result Drawer */}
-          {singleTestResult && (
-            <div className="p-3.5 bg-neutral-900/90 rounded-xl border border-white/10 space-y-2 text-xs my-2 w-full shadow-lg">
-              <div className="flex items-center justify-between border-b border-neutral-800 pb-2 flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  {singleTestResult.status === 'success' ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                  ) : (
-                    <XCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
-                  )}
-                  <span className="font-bold text-white">Single Step Test Telemetry</span>
-                  <span className="px-2 py-0.5 bg-neutral-950 text-rose-300 font-bold text-[10px] rounded border border-white/5">
-                    {singleTestResult.statusCode || 'ERR'}
-                  </span>
-                </div>
-                <div className="flex items-center gap-3 text-neutral-400 text-[11px]">
-                  <span>Latency: {singleTestResult.latencyMs}ms</span>
-                  <button onClick={() => setSingleTestResult(null)} className="hover:text-white px-1">
-                    ✕
+                  <button onClick={() => setAiSuggestions([])} className="text-[10px] text-neutral-400 hover:text-white cursor-pointer">
+                    Dismiss ✕
                   </button>
                 </div>
+                <div className="space-y-1 text-[11px] text-neutral-300">
+                  {aiSuggestions.map((sug, idx) => (
+                    <div key={idx} className="flex items-start gap-2">
+                      <span className="text-amber-400 font-bold">•</span>
+                      <span>{sug}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
+            )}
+          </div>
 
-              {singleTestResult.errorMessage && (
-                <div className="text-rose-400 text-[11px] font-bold break-all">{singleTestResult.errorMessage}</div>
-              )}
-
-              {singleTestResult.responseBody && (
-                <details className="text-[10px] text-neutral-400 cursor-pointer" open>
-                  <summary className="hover:text-white font-bold">Response Body</summary>
-                  <pre className="mt-1.5 p-3 bg-neutral-950 rounded-lg text-emerald-400 overflow-x-auto max-h-40 leading-relaxed border border-white/5 whitespace-pre-wrap break-all max-w-full">
-                    {typeof singleTestResult.responseBody === 'object'
-                      ? JSON.stringify(singleTestResult.responseBody, null, 2)
-                      : String(singleTestResult.responseBody)}
-                  </pre>
-                </details>
-              )}
-            </div>
+          {/* Standardized API Response Telemetry Drawer */}
+          {singleTestResult && (
+            <ApiResponseDrawer
+              result={{
+                stepId: (singleTestResult as any).stepId,
+                stepName: singleTestResult.stepName,
+                url: singleTestResult.url,
+                method: singleTestResult.method,
+                status: singleTestResult.status as any,
+                statusCode: singleTestResult.statusCode,
+                latencyMs: singleTestResult.latencyMs,
+                errorMessage: singleTestResult.errorMessage,
+                responseBody: singleTestResult.responseBody,
+                responseSnippet: (singleTestResult as any).responseSnippet,
+                cookies: singleTestResult.capturedCookies,
+                extractedVars: singleTestResult.extractedVars,
+                executionSource: singleTestResult.url?.includes('localhost') || singleTestResult.url?.includes('127.0.0.1') ? 'browser' : 'cloud',
+                timestamp: new Date().toLocaleTimeString(),
+              }}
+              title={`Step Test Telemetry: ${workflow?.steps[activeStepIndex]?.name || 'Request'}`}
+              onClose={() => setSingleTestResult(null)}
+            />
           )}
 
           {/* Navigation Tabs */}
@@ -3267,6 +3459,13 @@ export default function WorkflowDetailPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* AI Spec Import Modal */}
+      <AiSpecImportModal
+        isOpen={isAiSpecModalOpen}
+        onClose={() => setIsAiSpecModalOpen(false)}
+        onImport={handleImportAiSpec}
+      />
     </div>
   );
 }

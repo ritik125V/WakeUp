@@ -24,10 +24,15 @@ import {
   Filter,
   BarChart3,
   Check,
+  AlertTriangle,
+  Copy,
+  Terminal,
+  FileCode,
 } from 'lucide-react';
 import {
   fetchWorkflowById,
   triggerWorkflow,
+  executeWorkflowInBrowser,
   WorkflowData,
 } from '@/lib/api';
 import {
@@ -36,6 +41,12 @@ import {
   IStepTelemetryForPDF,
   IWorkflowRunSummaryForPDF,
 } from '@/lib/pdfReportGenerator';
+import {
+  generateAiDebugPrompt,
+  downloadAiDebugReportMarkdown,
+  openAiDebugReportInNewTab,
+} from '@/lib/aiDebugExporter';
+import { ApiResponseDrawer } from '@/components/ApiResponseDrawer';
 
 const API_SOCKET_URL = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5000';
 
@@ -51,6 +62,8 @@ export default function WorkflowReportPage() {
   const [summary, setSummary] = useState<IWorkflowRunSummaryForPDF | null>(null);
   const [filterStatus, setFilterStatus] = useState<'all' | 'success' | 'failed' | 'skipped'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [activeMainTab, setActiveMainTab] = useState<'telemetry' | 'rejected'>('telemetry');
+  const [copiedPrompt, setCopiedPrompt] = useState<boolean>(false);
 
   const socketRef = useRef<Socket | null>(null);
   const hasTriggeredRun = useRef<boolean>(false);
@@ -67,12 +80,40 @@ export default function WorkflowReportPage() {
     }
   };
 
-  const handleRunExecution = async () => {
+  const handleRunExecution = async (currentWf?: WorkflowData | null) => {
+    const targetWf = currentWf || workflow;
+    if (!targetWf) return;
+
     try {
       setIsRunning(true);
       setStepLogs([]);
       setSummary(null);
-      await triggerWorkflow(workflowId);
+
+      // Detect if workflow steps target user's local machine (localhost / 127.0.0.1)
+      const hasLocalhostSteps = targetWf.steps.some((step) => {
+        const u = (step.url || '').toLowerCase();
+        return u.includes('localhost') || u.includes('127.0.0.1') || u.includes('0.0.0.0') || u.includes('::1');
+      });
+
+      if (hasLocalhostSteps) {
+        // Zero setup direct browser execution for user's localhost machine
+        const resSummary = await executeWorkflowInBrowser(targetWf, (telemetry) => {
+          setStepLogs((prev) => {
+            const existingIdx = prev.findIndex((s) => s.stepIndex === telemetry.stepIndex);
+            if (existingIdx !== -1) {
+              const updated = [...prev];
+              updated[existingIdx] = telemetry;
+              return updated;
+            }
+            return [...prev, telemetry];
+          });
+        });
+        setSummary(resSummary);
+        setIsRunning(false);
+      } else {
+        // Remote production endpoints run via backend telemetry engine
+        await triggerWorkflow(workflowId);
+      }
     } catch (err) {
       console.error('Failed to trigger workflow execution:', err);
       setIsRunning(false);
@@ -84,6 +125,16 @@ export default function WorkflowReportPage() {
       loadWorkflow();
     }
   }, [workflowId]);
+
+  useEffect(() => {
+    if (!workflow) return;
+
+    // Trigger run once workflow data is loaded
+    if (!hasTriggeredRun.current) {
+      hasTriggeredRun.current = true;
+      handleRunExecution(workflow);
+    }
+  }, [workflow]);
 
   useEffect(() => {
     if (!workflowId) return;
@@ -127,16 +178,10 @@ export default function WorkflowReportPage() {
       setSummary(runSummary);
     });
 
-    // Auto trigger run ONLY ONCE on mount
-    if (!hasTriggeredRun.current) {
-      hasTriggeredRun.current = true;
-      handleRunExecution();
-    }
-
     return () => {
       socket.disconnect();
     };
-  }, [workflowId]);
+  }, [workflowId, workflow]);
 
   const handleExportJSON = () => {
     if (!workflow) return;
@@ -230,7 +275,7 @@ export default function WorkflowReportPage() {
 
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
             <button
-              onClick={handleRunExecution}
+              onClick={() => handleRunExecution()}
               disabled={isRunning}
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-lg border-none transition-all shadow-lg shadow-rose-600/20 disabled:opacity-50 cursor-pointer"
             >
@@ -349,203 +394,316 @@ export default function WorkflowReportPage() {
           </div>
         </div>
 
-        {/* Step Latency Distribution Graph */}
-        {stepLogs.length > 0 && (
-          <div className="p-5 bg-neutral-950/90 rounded-xl border border-white/10 space-y-3 shadow-lg">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-rose-400" /> Step Latency Comparison (ms)
-              </h3>
-              <span className="text-[11px] text-neutral-400">Max: {maxStepLatency}ms</span>
-            </div>
+        {/* Primary Navigation Tabs: Telemetry vs Rejected / Failed Steps */}
+        {(() => {
+          const failedStepsList = stepLogs.filter((s) => s.status === 'failed' || s.status === 'error');
+          return (
+            <div className="space-y-6">
+              {/* Tab Selector Bar */}
+              <div className="flex items-center gap-2 border-b border-neutral-900 pb-3 pt-2">
+                <button
+                  onClick={() => setActiveMainTab('telemetry')}
+                  className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-lg font-bold text-xs transition-all cursor-pointer ${
+                    activeMainTab === 'telemetry'
+                      ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40 shadow-lg'
+                      : 'bg-neutral-950 text-neutral-400 hover:text-white border border-white/10'
+                  }`}
+                >
+                  <Layers className="w-4 h-4 text-rose-400" />
+                  <span>📊 All Execution Telemetry</span>
+                  <span className="px-1.5 py-0.5 bg-neutral-900 text-neutral-300 text-[10px] rounded">
+                    {stepLogs.length}
+                  </span>
+                </button>
 
-            <div className="space-y-2 pt-1">
-              {stepLogs.map((step, idx) => {
-                const ratio = Math.min((step.latencyMs / maxStepLatency) * 100, 100);
-                return (
-                  <div key={idx} className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-neutral-300 font-bold truncate max-w-[300px]">
-                        Step {step.stepIndex}: {step.stepName}
-                      </span>
-                      <span className="text-rose-300 font-bold">{step.latencyMs} ms</span>
+                <button
+                  onClick={() => setActiveMainTab('rejected')}
+                  className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-lg font-bold text-xs transition-all cursor-pointer relative ${
+                    activeMainTab === 'rejected'
+                      ? 'bg-rose-600 text-white shadow-lg'
+                      : 'bg-neutral-950 text-neutral-400 hover:text-white border border-white/10'
+                  }`}
+                >
+                  <AlertTriangle className="w-4 h-4 text-rose-300" />
+                  <span>🚨 Rejected / Failed Step Logs</span>
+                  {failedStepsList.length > 0 ? (
+                    <span className="px-2 py-0.5 bg-rose-950 text-rose-300 border border-rose-500/30 text-[10px] rounded font-extrabold animate-pulse">
+                      {failedStepsList.length} FAILED
+                    </span>
+                  ) : (
+                    <span className="px-1.5 py-0.5 bg-neutral-900 text-neutral-400 text-[10px] rounded">
+                      0
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* Tab 1: Rejected / Failed Step Logs */}
+              {activeMainTab === 'rejected' && (
+                <div className="space-y-6">
+                  {failedStepsList.length > 0 ? (
+                    <div className="p-5 bg-neutral-950/90 rounded-xl border border-rose-500/20 space-y-4 shadow-xl">
+                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                        <div>
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-rose-950 text-rose-300 text-[10px] font-bold rounded-md mb-2">
+                            <AlertTriangle className="w-3.5 h-3.5 text-rose-400" /> REJECTED STEPS DETECTED
+                          </span>
+                          <h2 className="text-base font-bold text-white flex items-center gap-2">
+                            {failedStepsList.length} Step(s) Failed During Workflow Execution
+                          </h2>
+                          <p className="text-xs text-neutral-400 mt-1 max-w-2xl">
+                            Raw API Request Sent vs Response Received details for instant debugging. Copy details below or export as Markdown / Open in New Tab.
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            onClick={() => {
+                              const promptText = generateAiDebugPrompt(currentSummary, failedStepsList);
+                              navigator.clipboard.writeText(promptText);
+                              setCopiedPrompt(true);
+                              setTimeout(() => setCopiedPrompt(false), 2500);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-lg transition-all shadow-md cursor-pointer"
+                          >
+                            {copiedPrompt ? (
+                              <>
+                                <Check className="w-4 h-4 text-white" /> Log Copied!
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-4 h-4 text-white" /> Copy Request & Response Log
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            onClick={() => downloadAiDebugReportMarkdown(currentSummary, failedStepsList)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-neutral-900 hover:bg-neutral-850 text-rose-300 font-bold text-xs rounded-lg border border-white/10 transition-all cursor-pointer"
+                          >
+                            <FileDown className="w-4 h-4 text-rose-400" /> Export (.md)
+                          </button>
+
+                          <button
+                            onClick={() => openAiDebugReportInNewTab(currentSummary, failedStepsList)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-neutral-900 hover:bg-neutral-850 text-white font-bold text-xs rounded-lg border border-white/10 transition-all cursor-pointer"
+                          >
+                            <ExternalLink className="w-4 h-4 text-rose-400" /> Open in New Tab
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Live Raw Details Code Block */}
+                      <div className="space-y-2 pt-3 border-t border-neutral-900">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-neutral-300 flex items-center gap-1.5">
+                            <Terminal className="w-4 h-4 text-rose-400" /> Raw API Request & Response Details (Markdown)
+                          </span>
+                          <span className="text-[11px] text-neutral-500">Pure HTTP Sent vs Received Telemetry</span>
+                        </div>
+                        <div className="relative">
+                          <pre className="p-4 bg-black rounded-lg border border-neutral-850 text-neutral-300 text-[11px] font-mono max-h-64 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+                            {generateAiDebugPrompt(currentSummary, failedStepsList)}
+                          </pre>
+                        </div>
+                      </div>
                     </div>
-                    <div className="w-full h-2 bg-neutral-900 rounded-full overflow-hidden border border-white/5">
-                      <div
-                        style={{ width: `${ratio}%` }}
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          step.status === 'success'
-                            ? 'bg-emerald-400'
-                            : step.status === 'skipped'
-                            ? 'bg-neutral-600'
-                            : 'bg-rose-500'
+                  ) : (
+                    <div className="p-10 bg-neutral-950/80 rounded-xl border border-emerald-500/20 text-center space-y-3 shadow-lg">
+                      <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
+                      <h3 className="text-base font-bold text-white">Zero Rejected Steps!</h3>
+                      <p className="text-xs text-neutral-400 max-w-md mx-auto">
+                        All {workflow.steps.length} steps in this workflow completed with clean HTTP response status codes and expected data extractions. No failures detected.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Rejected Step Telemetry Drawers */}
+                  {failedStepsList.length > 0 && (
+                    <div className="space-y-4">
+                      <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-rose-400" /> Detailed Rejected Step Telemetry Drawers
+                      </h3>
+                      {failedStepsList.map((step, idx) => (
+                        <ApiResponseDrawer
+                          key={idx}
+                          result={{
+                            stepId: `step-${step.stepIndex}`,
+                            stepName: step.stepName,
+                            url: step.url,
+                            method: step.method,
+                            status: step.status as any,
+                            statusCode: step.statusCode,
+                            latencyMs: step.latencyMs,
+                            errorMessage: step.errorMessage,
+                            responseBody: step.responseBody,
+                            responseSnippet: typeof step.responseBody === 'string' ? step.responseBody : undefined,
+                            headers: step.requestHeaders,
+                            cookies: step.capturedCookies,
+                            extractedVars: step.extractedVars,
+                            executionSource: step.url?.includes('localhost') || step.url?.includes('127.0.0.1') ? 'browser' : 'cloud',
+                            timestamp: new Date().toLocaleTimeString(),
+                          }}
+                          title={`Failed Step ${step.stepIndex}: ${step.stepName}`}
+                          defaultOpen={true}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab 2: All Telemetry Logs & Latency Distribution */}
+              {activeMainTab === 'telemetry' && (
+                <div className="space-y-6">
+                  {/* Step Latency Distribution Graph */}
+                  {stepLogs.length > 0 && (
+                    <div className="p-5 bg-neutral-950/90 rounded-xl border border-white/10 space-y-3 shadow-lg">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                          <BarChart3 className="w-4 h-4 text-rose-400" /> Step Latency Comparison (ms)
+                        </h3>
+                        <span className="text-[11px] text-neutral-400">Max: {maxStepLatency}ms</span>
+                      </div>
+
+                      <div className="space-y-2 pt-1">
+                        {stepLogs.map((step, idx) => {
+                          const ratio = Math.min((step.latencyMs / maxStepLatency) * 100, 100);
+                          return (
+                            <div key={idx} className="space-y-1">
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="text-neutral-300 font-bold truncate max-w-[300px]">
+                                  Step {step.stepIndex}: {step.stepName}
+                                </span>
+                                <span className="text-rose-300 font-bold">{step.latencyMs} ms</span>
+                              </div>
+                              <div className="w-full h-2 bg-neutral-900 rounded-full overflow-hidden border border-white/5">
+                                <div
+                                  style={{ width: `${ratio}%` }}
+                                  className={`h-full rounded-full transition-all duration-500 ${
+                                    step.status === 'success'
+                                      ? 'bg-emerald-400'
+                                      : step.status === 'skipped'
+                                      ? 'bg-neutral-600'
+                                      : 'bg-rose-500'
+                                  }`}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Log Filter Tabs & Search Bar */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setFilterStatus('all')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          filterStatus === 'all'
+                            ? 'bg-rose-600 text-white shadow-md'
+                            : 'bg-neutral-950 text-neutral-400 hover:text-white border border-white/10'
                         }`}
+                      >
+                        All ({stepLogs.length})
+                      </button>
+                      <button
+                        onClick={() => setFilterStatus('success')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          filterStatus === 'success'
+                            ? 'bg-emerald-600 text-white shadow-md'
+                            : 'bg-neutral-950 text-neutral-400 hover:text-white border border-white/10'
+                        }`}
+                      >
+                        Passed ({stepLogs.filter((s) => s.status === 'success').length})
+                      </button>
+                      <button
+                        onClick={() => setFilterStatus('failed')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          filterStatus === 'failed'
+                            ? 'bg-rose-600 text-white shadow-md'
+                            : 'bg-neutral-950 text-neutral-400 hover:text-white border border-white/10'
+                        }`}
+                      >
+                        Failed ({stepLogs.filter((s) => s.status === 'failed' || s.status === 'error').length})
+                      </button>
+                      <button
+                        onClick={() => setFilterStatus('skipped')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          filterStatus === 'skipped'
+                            ? 'bg-neutral-800 text-white shadow-md'
+                            : 'bg-neutral-950 text-neutral-400 hover:text-white border border-white/10'
+                        }`}
+                      >
+                        Skipped ({stepLogs.filter((s) => s.status === 'skipped').length})
+                      </button>
+                    </div>
+
+                    <div className="relative max-w-xs w-full">
+                      <Search className="w-3.5 h-3.5 text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Search step log URL or name..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full bg-neutral-950 text-white pl-8 pr-3 py-1.5 rounded-lg text-xs border border-white/10 focus:outline-none focus:border-rose-500/50"
                       />
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
 
-        {/* Log Filter Tabs & Search Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setFilterStatus('all')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                filterStatus === 'all'
-                  ? 'bg-rose-600 text-white shadow-md'
-                  : 'bg-neutral-950 text-neutral-400 hover:text-white border border-white/10'
-              }`}
-            >
-              All ({stepLogs.length})
-            </button>
-            <button
-              onClick={() => setFilterStatus('success')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                filterStatus === 'success'
-                  ? 'bg-emerald-600 text-white shadow-md'
-                  : 'bg-neutral-950 text-neutral-400 hover:text-white border border-white/10'
-              }`}
-            >
-              Passed ({stepLogs.filter((s) => s.status === 'success').length})
-            </button>
-            <button
-              onClick={() => setFilterStatus('failed')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                filterStatus === 'failed'
-                  ? 'bg-rose-600 text-white shadow-md'
-                  : 'bg-neutral-950 text-neutral-400 hover:text-white border border-white/10'
-              }`}
-            >
-              Failed ({stepLogs.filter((s) => s.status === 'failed' || s.status === 'error').length})
-            </button>
-            <button
-              onClick={() => setFilterStatus('skipped')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                filterStatus === 'skipped'
-                  ? 'bg-neutral-800 text-white shadow-md'
-                  : 'bg-neutral-950 text-neutral-400 hover:text-white border border-white/10'
-              }`}
-            >
-              Skipped ({stepLogs.filter((s) => s.status === 'skipped').length})
-            </button>
-          </div>
+                  {/* Detailed Step Execution Feed */}
+                  <div className="space-y-4">
+                    <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-rose-400" /> Complete Step Execution Logs & Metrics
+                    </h2>
 
-          <div className="relative max-w-xs w-full">
-            <Search className="w-3.5 h-3.5 text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Search step log URL or name..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-neutral-950 text-white pl-8 pr-3 py-1.5 rounded-lg text-xs border border-white/10 focus:outline-none focus:border-rose-500/50"
-            />
-          </div>
-        </div>
-
-        {/* Detailed Step Execution Feed */}
-        <div className="space-y-4">
-          <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-            <Layers className="w-4 h-4 text-rose-400" /> Complete Step Execution Logs & Metrics
-          </h2>
-
-          <div className="space-y-4 w-full">
-            {filteredLogs.length === 0 ? (
-              <div className="p-12 bg-neutral-950/80 rounded-xl border border-white/10 text-center text-neutral-400 text-xs flex items-center justify-center gap-2">
-                {isRunning ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin text-rose-400" />
-                    <span>Streaming live step logs from Socket.IO runner engine...</span>
-                  </>
-                ) : (
-                  <span>No execution logs match the selected filter query.</span>
-                )}
-              </div>
-            ) : (
-              filteredLogs.map((step, idx) => (
-                <div key={idx} className="p-5 bg-neutral-950/80 rounded-xl space-y-3 border border-white/10 shadow-lg w-full">
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-900 pb-2">
-                    <div className="flex items-center gap-2.5">
-                      {step.status === 'success' ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                      ) : step.status === 'skipped' ? (
-                        <MinusCircle className="w-4 h-4 text-neutral-500 flex-shrink-0" />
+                    <div className="space-y-4 w-full">
+                      {filteredLogs.length === 0 ? (
+                        <div className="p-12 bg-neutral-950/80 rounded-xl border border-white/10 text-center text-neutral-400 text-xs flex items-center justify-center gap-2">
+                          {isRunning ? (
+                            <>
+                              <RefreshCw className="w-4 h-4 animate-spin text-rose-400" />
+                              <span>Streaming live step logs from Socket.IO runner engine...</span>
+                            </>
+                          ) : (
+                            <span>No execution logs match the selected filter query.</span>
+                          )}
+                        </div>
                       ) : (
-                        <XCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+                        filteredLogs.map((step, idx) => (
+                          <ApiResponseDrawer
+                            key={idx}
+                            result={{
+                              stepId: `step-${step.stepIndex}`,
+                              stepName: step.stepName,
+                              url: step.url,
+                              method: step.method,
+                              status: step.status as any,
+                              statusCode: step.statusCode,
+                              latencyMs: step.latencyMs,
+                              errorMessage: step.errorMessage,
+                              responseBody: step.responseBody,
+                              responseSnippet: typeof step.responseBody === 'string' ? step.responseBody : undefined,
+                              headers: step.requestHeaders,
+                              cookies: step.capturedCookies,
+                              extractedVars: step.extractedVars,
+                              executionSource: step.url?.includes('localhost') || step.url?.includes('127.0.0.1') ? 'browser' : 'cloud',
+                              timestamp: new Date().toLocaleTimeString(),
+                            }}
+                            title={`Step ${step.stepIndex}: ${step.stepName}`}
+                            defaultOpen={idx === 0 || step.status === 'failed' || step.status === 'error'}
+                          />
+                        ))
                       )}
-                      <span className="font-bold text-white text-sm">
-                        Step {step.stepIndex}: {step.stepName}
-                      </span>
-                      <span className={`px-2 py-0.5 font-bold text-[10px] rounded ${getMethodBadgeStyle(step.method)}`}>
-                        {step.method}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3 text-neutral-400 text-xs">
-                      <span
-                        className={`font-bold px-2 py-0.5 rounded text-[10px] ${
-                          step.status === 'success'
-                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
-                            : step.status === 'skipped'
-                            ? 'bg-neutral-900 text-neutral-400 border border-white/5'
-                            : 'bg-rose-950 text-rose-400 border border-rose-500/30'
-                        }`}
-                      >
-                        {step.status === 'skipped' ? 'SKIPPED' : step.statusCode || 'ERR'}
-                      </span>
-                      <span className="text-neutral-300 font-bold">{step.latencyMs}ms</span>
                     </div>
                   </div>
-
-                  <div className="text-xs text-neutral-400 break-all">
-                    URL: <span className="text-neutral-200 font-mono">{step.url}</span>
-                  </div>
-
-                  {step.errorMessage && (
-                    <div className="p-3 bg-rose-950/40 text-rose-300 rounded-lg border border-rose-500/20 text-xs font-bold">
-                      {step.errorMessage}
-                    </div>
-                  )}
-
-                  {step.capturedCookies && Object.keys(step.capturedCookies).length > 0 && (
-                    <div className="text-xs text-indigo-400 font-bold">
-                      Cookies Captured: {Object.keys(step.capturedCookies).join(', ')}
-                    </div>
-                  )}
-
-                  {step.extractedVars && Object.keys(step.extractedVars).length > 0 && (
-                    <div className="text-xs text-emerald-400 font-bold">
-                      Extracted Context Variables: {JSON.stringify(step.extractedVars)}
-                    </div>
-                  )}
-
-                  {step.requestHeaders && Object.keys(step.requestHeaders).length > 0 && (
-                    <details className="text-xs text-neutral-400 cursor-pointer pt-1">
-                      <summary className="hover:text-white font-bold">Inspect Sent Request Headers</summary>
-                      <pre className="mt-1.5 p-3 bg-neutral-900 rounded-lg text-neutral-300 overflow-x-auto max-h-36 leading-relaxed border border-white/5 whitespace-pre-wrap break-all max-w-full">
-                        {JSON.stringify(step.requestHeaders, null, 2)}
-                      </pre>
-                    </details>
-                  )}
-
-                  {step.responseBody && (
-                    <details className="text-xs text-neutral-400 cursor-pointer pt-1" open>
-                      <summary className="hover:text-white font-bold">Inspect Response Body Snippet</summary>
-                      <pre className="mt-1.5 p-3.5 bg-neutral-900 rounded-xl text-emerald-400 overflow-x-auto max-h-60 leading-relaxed border border-white/5 whitespace-pre-wrap break-all max-w-full">
-                        {typeof step.responseBody === 'object'
-                          ? JSON.stringify(step.responseBody, null, 2)
-                          : String(step.responseBody)}
-                      </pre>
-                    </details>
-                  )}
                 </div>
-              ))
-            )}
-          </div>
-        </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

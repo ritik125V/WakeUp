@@ -213,4 +213,34 @@ router.put('/profile', authenticateToken, async (req: AuthRequest, res: Response
   }
 });
 
+/**
+ * Delete current user account and clean up associated resources
+ */
+router.delete('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const userId = req.user.id;
+    const deletedUser = await UserModel.findByIdAndDelete(userId);
+    if (!deletedUser) {
+      return res.status(404).json({ error: 'User account not found' });
+    }
+
+    // Clean up all resources created by this user
+    await Promise.allSettled([
+      import('../models/Endpoint.js').then(({ EndpointModel }) => EndpointModel.deleteMany({ userId })),
+      import('../models/Workflow.js').then(({ WorkflowModel }) => WorkflowModel.deleteMany({ userId })),
+      import('../models/StatusPage.js').then(({ StatusPageModel }) => StatusPageModel.deleteMany({ userId })),
+    ]);
+
+    res.json({ message: 'User account and associated resources deleted successfully' });
+  } catch (error: unknown) {
+    console.error('Error deleting user account:', error);
+    res.status(500).json({ error: 'Failed to delete user account' });
+  }
+});
+
 export default router;
+

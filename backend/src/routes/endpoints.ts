@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Router, Request, Response } from 'express';
 import { EndpointModel, extractProjectName } from '../models/Endpoint.js';
 import { IncidentModel } from '../models/Incident.js';
@@ -9,6 +10,7 @@ const router = Router();
 
 // Apply auth middleware to all endpoint operations
 router.use(authenticateToken as any);
+
 
 /**
  * Register a new endpoint / backend service
@@ -90,10 +92,16 @@ router.get('/', async (req: AuthRequest, res: Response) => {
 router.get('/:id', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id || 'guest-user';
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ error: 'Endpoint not found or invalid ID' });
+    }
+
     const endpoint = await EndpointModel.findOne({ _id: req.params.id, userId });
     if (!endpoint) {
       return res.status(404).json({ error: 'Endpoint not found' });
     }
+
 
     const incidents = await IncidentModel.find({ endpointId: endpoint._id })
       .sort({ startedAt: -1 })

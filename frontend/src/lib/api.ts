@@ -544,15 +544,23 @@ export async function browserDirectTestStep(
         status: 'success',
         statusCode: 200,
         latencyMs,
-        responseSnippet: 'Local server responded successfully (Direct Browser Execution).',
+        responseSnippet: `Local server reachable in ${latencyMs}ms (Direct Browser Execution).\n\n⚠️ Note: Response body & exact HTTP status are hidden by Browser Security because your local API is missing CORS headers.\n\n💡 To view full JSON response body & headers in the UI, enable CORS on your local backend:\n  • Express.js: app.use(require('cors')())\n  • Python FastAPI: app.add_middleware(CORSMiddleware, allow_origins=["*"])\n  • Python Flask: CORS(app)\n  • Spring Boot: @CrossOrigin(origins = "*")`,
         extractedVars: {},
       };
     }
 
     const statusCode = response.status;
-    const isSuccess = step.expectedStatusCode
-      ? statusCode === step.expectedStatusCode
-      : statusCode >= 200 && statusCode < 400;
+    const expected = step.expectedStatusCode || 200;
+    const isSuccess =
+      statusCode === expected ||
+      (expected === 200 && statusCode === 201) ||
+      (expected === 201 && statusCode === 200) ||
+      (statusCode >= 200 && statusCode < 300 && (!step.expectedStatusCode || step.expectedStatusCode === 200 || step.expectedStatusCode === 201));
+
+    let errorMessage: string | undefined = undefined;
+    if (!isSuccess) {
+      errorMessage = `Status code mismatch: Expected ${expected}, received ${statusCode}`;
+    }
 
     let responseSnippet = '';
     try {
@@ -564,16 +572,18 @@ export async function browserDirectTestStep(
       responseSnippet = '[Binary / Non-text Response]';
     }
 
-    // Extract Variables if defined
+    // Extract Variables if defined using JSONPath helper
     const extractedVars: Record<string, string> = {};
     if (step.extractVariables && Array.isArray(step.extractVariables)) {
       try {
         const json = JSON.parse(responseSnippet);
         for (const ext of step.extractVariables) {
           if (ext.varName && ext.jsonPath) {
-            const val = ext.jsonPath.split('.').reduce((o: any, i) => o?.[i], json);
-            if (val !== undefined) {
-              extractedVars[ext.varName] = String(val);
+            const cleanPath = ext.jsonPath.replace(/^(\$\.|data\.)/, '');
+            const val = cleanPath.split('.').reduce((o: any, i) => o?.[i], json);
+            if (val !== undefined && val !== null) {
+              const valStr = typeof val === 'object' ? JSON.stringify(val) : String(val);
+              extractedVars[ext.varName] = valStr;
             }
           }
         }
@@ -588,6 +598,7 @@ export async function browserDirectTestStep(
       status: isSuccess ? 'success' : 'failed',
       statusCode,
       latencyMs,
+      errorMessage,
       responseSnippet,
       extractedVars,
     };
@@ -611,14 +622,21 @@ export const testSingleWorkflowStep = async (
   variablesContext?: Record<string, string>,
   cookiesContext?: Record<string, string>
 ): Promise<any> => {
-  const url = step.url || '';
+  let resolvedUrl = step.url || '';
+  if (variablesContext) {
+    Object.entries(variablesContext).forEach(([k, v]) => {
+      resolvedUrl = resolvedUrl.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), v);
+    });
+  }
+
   const isLocalhost =
-    url.includes('localhost') ||
-    url.includes('127.0.0.1') ||
-    url.includes('0.0.0.0');
+    resolvedUrl.includes('localhost') ||
+    resolvedUrl.includes('127.0.0.1') ||
+    resolvedUrl.includes('0.0.0.0') ||
+    resolvedUrl.includes('::1');
 
   if (isLocalhost) {
-    // Zero setup direct browser execution for localhost URLs
+    // Zero setup direct browser execution for localhost URLs (bypasses remote server loopback)
     return await browserDirectTestStep(step, variablesContext, cookiesContext);
   }
 
@@ -630,6 +648,85 @@ export const testSingleWorkflowStep = async (
     return await browserDirectTestStep(step, variablesContext, cookiesContext);
   }
 };
+
+export async function executeWorkflowInBrowser(
+  workflow: WorkflowData,
+  onStepCompleted?: (telemetry: any) => void
+): Promise<any> {
+  const startTime = Date.now();
+  const stepLogs: any[] = [];
+  let variablesContext: Record<string, string> = {};
+  let cookiesContext: Record<string, string> = {};
+  let overallStatus: 'success' | 'failed' | 'error' = 'success';
+
+  for (let idx = 0; idx < workflow.steps.length; idx++) {
+    const step = workflow.steps[idx];
+
+    if (step.skipped) {
+      const skippedTelemetry = {
+        stepIndex: idx + 1,
+        stepId: step.stepId,
+        stepName: step.name,
+        method: step.method,
+        url: step.url,
+        requestHeaders: step.headers || {},
+        latencyMs: 0,
+        status: 'skipped',
+        errorMessage: 'Step skipped by user preference',
+        timestamp: new Date().toISOString(),
+      };
+      stepLogs.push(skippedTelemetry);
+      if (onStepCompleted) onStepCompleted(skippedTelemetry);
+      continue;
+    }
+
+    const stepResult = await browserDirectTestStep(step, variablesContext, cookiesContext);
+
+    // Merge extracted variables into context for subsequent steps
+    if (stepResult.extractedVars) {
+      variablesContext = { ...variablesContext, ...stepResult.extractedVars };
+    }
+
+    const telemetry = {
+      stepIndex: idx + 1,
+      stepId: step.stepId,
+      stepName: step.name,
+      method: step.method,
+      url: stepResult.url || step.url,
+      requestHeaders: step.headers || {},
+      statusCode: stepResult.statusCode,
+      responseBody: stepResult.responseSnippet || stepResult.responseBody,
+      latencyMs: stepResult.latencyMs || 0,
+      status: stepResult.status === 'success' ? 'success' : 'failed',
+      errorMessage: stepResult.errorMessage,
+      capturedCookies: stepResult.capturedCookies || {},
+      extractedVars: stepResult.extractedVars || {},
+      timestamp: new Date().toISOString(),
+    };
+
+    if (telemetry.status === 'failed') {
+      overallStatus = 'failed';
+    }
+
+    stepLogs.push(telemetry);
+    if (onStepCompleted) onStepCompleted(telemetry);
+  }
+
+  const finishedAt = new Date().toISOString();
+  const totalTimeMs = Date.now() - startTime;
+
+  return {
+    workflowName: workflow.name,
+    startedAt: new Date(startTime).toISOString(),
+    finishedAt,
+    totalTimeMs,
+    totalSteps: workflow.steps.length,
+    successSteps: stepLogs.filter((s) => s.status === 'success').length,
+    failedSteps: stepLogs.filter((s) => s.status === 'failed' || s.status === 'error').length,
+    overallStatus,
+    steps: stepLogs,
+  };
+}
 
 export interface IScannedEndpoint {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
