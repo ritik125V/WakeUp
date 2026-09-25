@@ -17,6 +17,10 @@ import {
   Layers,
   Lock,
   ArrowLeft,
+  GitBranch,
+  Sparkles,
+  Copy,
+  Check,
 } from 'lucide-react';
 import {
   fetchCurrentUser,
@@ -24,6 +28,10 @@ import {
   updateUserProfile,
   fetchGroupedEndpoints,
   fetchWorkflows,
+  fetchUserGithubStatus,
+  bindUserGithubInstallationId,
+  fetchGithubAppConfig,
+  IUserGithubStatus,
   UserData,
 } from '@/lib/api';
 
@@ -49,6 +57,44 @@ export default function ProfilePage() {
   const [confirmPin, setConfirmPin] = useState('');
   const [changingPin, setChangingPin] = useState(false);
   const [pinMsg, setPinMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Global GitHub Integration State
+  const [githubStatus, setGithubStatus] = useState<IUserGithubStatus | null>(null);
+  const [githubAppConfig, setGithubAppConfig] = useState<{ appName: string; installUrl: string } | null>(null);
+  const [manualInstallationId, setManualInstallationId] = useState('');
+  const [bindingGithub, setBindingGithub] = useState(false);
+  const [githubMsg, setGithubMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
+
+  const loadGithubInfo = async () => {
+    try {
+      const [statusRes, configRes] = await Promise.all([
+        fetchUserGithubStatus().catch(() => null),
+        fetchGithubAppConfig().catch(() => null),
+      ]);
+      if (statusRes) setGithubStatus(statusRes);
+      if (configRes) setGithubAppConfig(configRes);
+    } catch (e) {
+      console.error('Failed to load GitHub info:', e);
+    }
+  };
+
+  const handleBindInstallationId = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualInstallationId.trim()) return;
+    try {
+      setBindingGithub(true);
+      setGithubMsg(null);
+      const res = await bindUserGithubInstallationId(manualInstallationId.trim());
+      setGithubMsg({ type: 'success', text: res.message });
+      setManualInstallationId('');
+      loadGithubInfo();
+    } catch (err: any) {
+      setGithubMsg({ type: 'error', text: err?.response?.data?.error || 'Failed to bind GitHub App Installation ID' });
+    } finally {
+      setBindingGithub(false);
+    }
+  };
 
   useEffect(() => {
     async function loadData() {
@@ -381,6 +427,112 @@ export default function ProfilePage() {
               )}
             </button>
           </form>
+        </div>
+
+        {/* Global GitHub App Integration Card */}
+        <div className="p-6 bg-gradient-to-r from-purple-950/40 via-neutral-950 to-rose-950/40 rounded-lg space-y-5 border-none shadow-md">
+          <div className="border-b border-neutral-900 pb-3 flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <GitBranch className="w-4 h-4 text-purple-400" /> GLOBAL GITHUB APP INTEGRATION
+              </h2>
+              <p className="text-xs text-neutral-400 mt-1">
+                Connect your GitHub Account ONCE globally to enable automatic commit triggers and single-webhook deployment across all workflows.
+              </p>
+            </div>
+            {githubStatus?.githubAppConnected ? (
+              <span className="px-3 py-1.5 bg-emerald-950 text-emerald-300 text-xs font-bold rounded-md font-mono flex items-center gap-1.5 border-none">
+                <Check className="w-3.5 h-3.5 text-emerald-400" /> CONNECTED GLOBALLY
+              </span>
+            ) : (
+              <a
+                href={`${githubAppConfig?.installUrl || 'https://github.com/apps/wakeup-runner/installations/new'}`}
+                target="_blank"
+                rel="noreferrer"
+                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-rose-600 hover:from-purple-500 hover:to-rose-500 text-white font-bold text-xs rounded-md border-none cursor-pointer flex items-center gap-1.5 transition-all shadow-md text-decoration-none"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>⚡ Connect GitHub Account</span>
+              </a>
+            )}
+          </div>
+
+          {githubMsg && (
+            <div
+              className={`p-3 text-xs rounded-md flex items-center gap-2 ${
+                githubMsg.type === 'success'
+                  ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/60'
+                  : 'bg-rose-950/60 text-rose-300 border border-rose-800/60'
+              }`}
+            >
+              {githubMsg.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0" />
+              )}
+              <span>{githubMsg.text}</span>
+            </div>
+          )}
+
+          {githubStatus?.githubInstallationId && (
+            <div className="p-3 bg-black/60 rounded-md font-mono text-xs text-purple-300 flex items-center justify-between gap-3">
+              <span>GLOBAL INSTALLATION ID: {githubStatus.githubInstallationId}</span>
+              <span className="text-emerald-400 font-bold flex items-center gap-1">
+                <Check className="w-3 h-3" /> ACTIVE FOR ALL RUNNERS
+              </span>
+            </div>
+          )}
+
+          {/* Single Global Webhook Display */}
+          <div className="space-y-2 pt-1">
+            <label className="text-xs font-bold text-neutral-300 uppercase block">
+              SINGLE UNIFIED WEBHOOK URL (FOR ALL RUNNERS)
+            </label>
+            <div className="flex items-center gap-2 bg-black p-2.5 rounded-md border-none">
+              <code className="text-xs text-rose-300 truncate flex-1 font-mono">
+                {githubStatus?.webhookUrl || 'https://api.wakeup.r8r.in/api/workflows/github-webhook'}
+              </code>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(
+                    githubStatus?.webhookUrl || 'https://api.wakeup.r8r.in/api/workflows/github-webhook'
+                  );
+                  setCopiedWebhook(true);
+                  setTimeout(() => setCopiedWebhook(false), 2000);
+                }}
+                className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-bold border-none cursor-pointer flex items-center gap-1 shrink-0"
+              >
+                {copiedWebhook ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedWebhook ? 'Copied' : 'Copy'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Manual Bind Option */}
+          {!githubStatus?.githubAppConnected && (
+            <form onSubmit={handleBindInstallationId} className="pt-3 border-t border-neutral-900 space-y-3">
+              <label className="text-xs font-bold text-neutral-400 uppercase block">
+                OR BIND EXISTING GITHUB INSTALLATION ID:
+              </label>
+              <div className="flex items-center gap-2 max-w-md">
+                <input
+                  type="text"
+                  value={manualInstallationId}
+                  onChange={(e) => setManualInstallationId(e.target.value)}
+                  placeholder="e.g. 69201948 (from github.com/settings/installations/...)"
+                  className="flex-1 px-3.5 py-2 bg-black border border-neutral-800 focus:border-rose-400 rounded-md text-white text-xs outline-none font-mono"
+                />
+                <button
+                  type="submit"
+                  disabled={bindingGithub || !manualInstallationId.trim()}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-md border-none cursor-pointer disabled:opacity-50"
+                >
+                  {bindingGithub ? 'Binding...' : 'Bind ID'}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
     </div>

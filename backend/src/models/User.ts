@@ -7,6 +7,9 @@ export interface IUser extends Document {
   name?: string;
   avatar?: string;
   provider: 'credentials' | 'google' | 'github';
+  githubInstallationId?: string;
+  githubAppConnected?: boolean;
+  githubUsername?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -18,6 +21,9 @@ const userSchema = new Schema<IUser>(
     name: { type: String, default: '' },
     avatar: { type: String, default: '' },
     provider: { type: String, enum: ['credentials', 'google', 'github'], default: 'credentials' },
+    githubInstallationId: { type: String, default: '' },
+    githubAppConnected: { type: Boolean, default: false },
+    githubUsername: { type: String, default: '' },
   },
   {
     timestamps: true,

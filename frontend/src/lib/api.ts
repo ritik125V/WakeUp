@@ -27,6 +27,8 @@ export interface UserData {
   name?: string;
   avatar?: string;
   provider: 'credentials' | 'google' | 'github';
+  githubInstallationId?: string;
+  githubAppConnected?: boolean;
 }
 
 export interface AuthResponse {
@@ -856,6 +858,23 @@ export const getBackendWebhookUrl = (secretToken: string = ''): string => {
 
 export const fetchGithubAppConfig = async (): Promise<{ appName: string; installUrl: string; enabled: boolean }> => {
   const response = await apiClient.get<{ appName: string; installUrl: string; enabled: boolean }>('/workflows/github-app/config');
+  return response.data;
+};
+
+export interface IUserGithubStatus {
+  githubAppConnected: boolean;
+  githubInstallationId: string;
+  githubUsername?: string;
+  webhookUrl: string;
+}
+
+export const fetchUserGithubStatus = async (): Promise<IUserGithubStatus> => {
+  const response = await apiClient.get<IUserGithubStatus>('/workflows/user/github-status');
+  return response.data;
+};
+
+export const bindUserGithubInstallationId = async (installationId: string): Promise<{ message: string; githubInstallationId: string; githubAppConnected: boolean }> => {
+  const response = await apiClient.post<{ message: string; githubInstallationId: string; githubAppConnected: boolean }>('/workflows/user/github-bind', { installationId });
   return response.data;
 };
 

@@ -3,6 +3,7 @@ import axios from 'axios';
 import { WorkflowModel } from '../models/Workflow';
 import { WorkflowRunModel } from '../models/WorkflowRun';
 import { WebhookLogModel } from '../models/WebhookLog';
+import { UserModel } from '../models/User';
 import { authenticateToken, AuthRequest } from '../middleware/authMiddleware';
 import { runWorkflowExecution, executeSingleStepTest } from '../services/workflowRunner';
 import { scanGithubRepositoryEndpoints, listGithubRepoFiles } from '../services/codeEndpointScanner';
@@ -74,32 +75,111 @@ router.get('/github-app/config', async (req: Request, res: Response) => {
  */
 router.get('/github-app/callback', async (req: Request, res: Response) => {
   const installationId = (req.query.installation_id as string) || '';
-  const workflowId = (req.query.state as string) || '';
+  const state = (req.query.state as string) || '';
   const setupAction = (req.query.setup_action as string) || 'install';
   const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
 
-  console.log(`\n[⚡ GITHUB APP CALLBACK] Installation ID: ${installationId} | Workflow: ${workflowId} | Action: ${setupAction}`);
+  console.log(`\n[⚡ GITHUB APP CALLBACK] Installation ID: ${installationId} | State: ${state} | Action: ${setupAction}`);
 
-  if (workflowId && workflowId.length === 24) {
+  // Link to specific workflow if state is a 24-character ObjectId
+  let linkedWorkflowId = '';
+  if (state && state.length === 24) {
     try {
-      const workflow = await WorkflowModel.findById(workflowId);
+      const workflow = await WorkflowModel.findById(state);
       if (workflow) {
         workflow.githubInstallationId = installationId;
         workflow.githubAppConnected = true;
         workflow.githubEnabled = true;
         await workflow.save();
-        console.log(`✅ [GITHUB APP LINKED] Workflow "${workflow.name}" linked to Installation ID ${installationId}`);
+        linkedWorkflowId = workflow._id.toString();
+        console.log(`✅ [GITHUB APP LINKED TO WORKFLOW] "${workflow.name}" linked to Installation ID ${installationId}`);
+
+        // Also update the workflow owner globally
+        await UserModel.findByIdAndUpdate(workflow.userId, {
+          githubInstallationId: installationId,
+          githubAppConnected: true,
+        });
       }
     } catch (err) {
       console.error('Failed to link GitHub App installation to workflow:', err);
     }
   }
 
-  const redirectUrl = workflowId 
-    ? `${frontendUrl}/workflows/${workflowId}?github_app_connected=true` 
-    : `${frontendUrl}/workflows?github_app_connected=true`;
+  // Update most recent user if workflowId wasn't passed directly
+  if (!linkedWorkflowId && installationId) {
+    try {
+      await UserModel.findOneAndUpdate(
+        {},
+        { githubInstallationId: installationId, githubAppConnected: true },
+        { sort: { updatedAt: -1 } }
+      );
+    } catch (err) {
+      console.error('Failed to update user with global GitHub installation:', err);
+    }
+  }
+
+  const redirectUrl = linkedWorkflowId 
+    ? `${frontendUrl}/workflows/${linkedWorkflowId}?github_app_connected=true` 
+    : `${frontendUrl}/profile?github_app_connected=true`;
 
   res.redirect(redirectUrl);
+});
+
+/**
+ * GET Endpoint: Fetch Global User GitHub App Connection Status
+ */
+router.get('/user/github-status', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const user = await UserModel.findById(userId).lean();
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({
+      githubAppConnected: user.githubAppConnected || false,
+      githubInstallationId: user.githubInstallationId || '',
+      githubUsername: user.githubUsername || '',
+      webhookUrl: `${(process.env.FRONTEND_URL || 'https://api.wakeup.r8r.in').replace(/\/+$/, '')}/api/workflows/github-webhook`,
+    });
+  } catch (err) {
+    console.error('Failed to fetch user GitHub status:', err);
+    res.status(500).json({ error: 'Failed to fetch user GitHub status' });
+  }
+});
+
+/**
+ * POST Endpoint: Bind Global User GitHub Installation ID Manually
+ */
+router.post('/user/github-bind', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const { installationId } = req.body;
+  if (!installationId || typeof installationId !== 'string') {
+    return res.status(400).json({ error: 'Installation ID is required' });
+  }
+
+  try {
+    const userId = req.user?.id;
+    const cleanId = installationId.trim();
+    await UserModel.findByIdAndUpdate(
+      userId,
+      { githubInstallationId: cleanId, githubAppConnected: true }
+    );
+
+    // Also update all workflows belonging to this user
+    await WorkflowModel.updateMany(
+      { userId },
+      { githubInstallationId: cleanId, githubAppConnected: true, githubEnabled: true }
+    );
+
+    res.json({
+      message: 'Successfully linked GitHub App globally to your account!',
+      githubInstallationId: cleanId,
+      githubAppConnected: true,
+    });
+  } catch (err) {
+    console.error('Failed to bind GitHub App installation ID:', err);
+    res.status(500).json({ error: 'Failed to bind GitHub App installation ID' });
+  }
 });
 
 /**
