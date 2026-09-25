@@ -27,6 +27,18 @@ import {
 } from '@/lib/api';
 import { AdminNavbar } from '@/components/AdminNavbar';
 
+function InfoTooltip({ text }: { text: string }) {
+  return (
+    <span className="relative inline-block group cursor-help ml-1 align-middle">
+      <Info className="w-3.5 h-3.5 text-neutral-500 group-hover:text-rose-400 transition-colors inline-block" />
+      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-64 p-2.5 bg-neutral-900 text-white text-[11px] font-sans rounded-xl shadow-2xl z-50 pointer-events-none leading-relaxed border-none text-left font-normal normal-case tracking-normal">
+        {text}
+        <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-neutral-900" />
+      </span>
+    </span>
+  );
+}
+
 export default function SystemStatsPage() {
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
   const [worker, setWorker] = useState<AdminWorkerStatus | null>(null);
@@ -68,7 +80,7 @@ export default function SystemStatsPage() {
               <Cpu className="w-5 h-5 text-rose-400" /> System Stats & Technical Architecture
             </h1>
             <p className="text-xs text-neutral-400 mt-0.5">
-              Real-time health diagnostics, worker performance metrics, and zero-overhead anomaly detection
+              Real-time health diagnostics, worker performance metrics, and zero-overhead anomaly detection (Hover over <Info className="w-3 h-3 text-rose-400 inline" /> icons for explanations)
             </p>
           </div>
 
@@ -95,7 +107,10 @@ export default function SystemStatsPage() {
                   <Gauge className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-sm font-bold text-white">Operational Health & Anomaly Detector</h2>
+                  <h2 className="text-sm font-bold text-white">
+                    Operational Health & Anomaly Detector
+                    <InfoTooltip text="Evaluates memory pressure, database latency, service outages, and active incidents in real time without background CPU load." />
+                  </h2>
                   <p className="text-xs text-neutral-400">On-demand evaluation probe (Zero continuous CPU / RAM background load)</p>
                 </div>
               </div>
@@ -128,7 +143,10 @@ export default function SystemStatsPage() {
                 return (
                   <div className="p-4 bg-neutral-900/60 rounded-xl space-y-3">
                     <div className="flex justify-between items-center text-xs">
-                      <span className="text-neutral-400 font-medium">Memory Heap Pressure</span>
+                      <span className="text-neutral-400 font-medium">
+                        Memory Heap Pressure
+                        <InfoTooltip text="Memory dynamically allocated for active JavaScript objects & variables in Node.js. High heap usage (>80%) indicates memory leak risks." />
+                      </span>
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
                           heapUsedMb >= 400
@@ -152,7 +170,10 @@ export default function SystemStatsPage() {
                       </div>
                     </div>
 
-                    <span className="text-[11px] font-mono text-neutral-500 block">RSS Memory: {diagnostics.memory.rssMb} MB</span>
+                    <span className="text-[11px] font-mono text-neutral-500 block">
+                      RSS Memory: {diagnostics.memory.rssMb} MB
+                      <InfoTooltip text="Resident Set Size (RSS): Total physical RAM occupied by your backend Node.js process (includes code, libraries, and memory heap)." />
+                    </span>
                   </div>
                 );
               })()}
@@ -166,7 +187,10 @@ export default function SystemStatsPage() {
                 return (
                   <div className="p-4 bg-neutral-900/60 rounded-xl space-y-3">
                     <div className="flex justify-between items-center text-xs">
-                      <span className="text-neutral-400 font-medium">DB Query Latency</span>
+                      <span className="text-neutral-400 font-medium">
+                        DB Query Latency
+                        <InfoTooltip text="Round-trip response time (in milliseconds) for an indexed MongoDB query probe. Lower is faster (<100ms is healthy)." />
+                      </span>
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
                           lat >= 250
@@ -203,7 +227,10 @@ export default function SystemStatsPage() {
                 return (
                   <div className="p-4 bg-neutral-900/60 rounded-xl space-y-3">
                     <div className="flex justify-between items-center text-xs">
-                      <span className="text-neutral-400 font-medium">Outage Failure Ratio</span>
+                      <span className="text-neutral-400 font-medium">
+                        Outage Failure Ratio
+                        <InfoTooltip text="Percentage of monitored API endpoints currently experiencing outages or degraded performance." />
+                      </span>
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
                           failPct >= 40
@@ -243,7 +270,10 @@ export default function SystemStatsPage() {
                 return (
                   <div className="p-4 bg-neutral-900/60 rounded-xl space-y-3">
                     <div className="flex justify-between items-center text-xs">
-                      <span className="text-neutral-400 font-medium">Active Incidents Risk</span>
+                      <span className="text-neutral-400 font-medium">
+                        Active Incidents Risk
+                        <InfoTooltip text="Number of ongoing service outages that have not yet been marked as resolved." />
+                      </span>
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
                           activeCount > 4

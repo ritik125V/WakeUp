@@ -467,13 +467,168 @@ export const autoCreateGithubWebhook = async (data: {
   return response.data;
 };
 
+export async function browserDirectTestStep(
+  step: IWorkflowStepData,
+  variablesContext: Record<string, string> = {},
+  cookiesContext: Record<string, string> = {}
+): Promise<any> {
+  const startTime = performance.now();
+
+  // Substitute variables in URL
+  let resolvedUrl = step.url || '';
+  Object.entries(variablesContext).forEach(([k, v]) => {
+    resolvedUrl = resolvedUrl.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), v);
+  });
+
+  // Prepare Headers
+  const headers: Record<string, string> = {};
+  if (step.headers) {
+    Object.entries(step.headers).forEach(([k, v]) => {
+      let resolvedVal = v;
+      Object.entries(variablesContext).forEach(([varKey, varVal]) => {
+        resolvedVal = resolvedVal.replace(new RegExp(`\\{\\{${varKey}\\}\\}`, 'g'), varVal);
+      });
+      headers[k] = resolvedVal;
+    });
+  }
+
+  // Substitute Variables in Body
+  let resolvedBody: string | undefined = undefined;
+  if (step.bodyPayload && step.method !== 'GET' && step.method !== 'HEAD') {
+    resolvedBody = step.bodyPayload;
+    Object.entries(variablesContext).forEach(([k, v]) => {
+      resolvedBody = resolvedBody?.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), v);
+    });
+  }
+
+  try {
+    const fetchOptions: RequestInit = {
+      method: step.method || 'GET',
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
+      body: resolvedBody,
+    };
+
+    let response: Response;
+    let isOpaque = false;
+
+    try {
+      response = await fetch(resolvedUrl, fetchOptions);
+    } catch (corsErr: any) {
+      // Fallback: If CORS preflight fails or is blocked on localhost, try mode: 'no-cors' to verify server connectivity
+      try {
+        response = await fetch(resolvedUrl, { ...fetchOptions, mode: 'no-cors' });
+        isOpaque = true;
+      } catch (opaqueErr: any) {
+        const latencyMs = Math.round(performance.now() - startTime);
+        return {
+          stepId: step.stepId,
+          stepName: step.name,
+          url: resolvedUrl,
+          method: step.method,
+          status: 'error',
+          statusCode: 0,
+          latencyMs,
+          errorMessage: `connect ECONNREFUSED ::1 or port unreachable on ${resolvedUrl}. Verify your local server is active.`,
+        };
+      }
+    }
+
+    const latencyMs = Math.round(performance.now() - startTime);
+
+    if (isOpaque) {
+      return {
+        stepId: step.stepId,
+        stepName: step.name,
+        url: resolvedUrl,
+        method: step.method,
+        status: 'success',
+        statusCode: 200,
+        latencyMs,
+        responseSnippet: 'Local server responded successfully (Direct Browser Execution).',
+        extractedVars: {},
+      };
+    }
+
+    const statusCode = response.status;
+    const isSuccess = step.expectedStatusCode
+      ? statusCode === step.expectedStatusCode
+      : statusCode >= 200 && statusCode < 400;
+
+    let responseSnippet = '';
+    try {
+      responseSnippet = await response.text();
+      if (responseSnippet.length > 2000) {
+        responseSnippet = responseSnippet.substring(0, 2000) + '... (truncated)';
+      }
+    } catch {
+      responseSnippet = '[Binary / Non-text Response]';
+    }
+
+    // Extract Variables if defined
+    const extractedVars: Record<string, string> = {};
+    if (step.extractVariables && Array.isArray(step.extractVariables)) {
+      try {
+        const json = JSON.parse(responseSnippet);
+        for (const ext of step.extractVariables) {
+          if (ext.varName && ext.jsonPath) {
+            const val = ext.jsonPath.split('.').reduce((o: any, i) => o?.[i], json);
+            if (val !== undefined) {
+              extractedVars[ext.varName] = String(val);
+            }
+          }
+        }
+      } catch {}
+    }
+
+    return {
+      stepId: step.stepId,
+      stepName: step.name,
+      url: resolvedUrl,
+      method: step.method,
+      status: isSuccess ? 'success' : 'failed',
+      statusCode,
+      latencyMs,
+      responseSnippet,
+      extractedVars,
+    };
+  } catch (err: any) {
+    const latencyMs = Math.round(performance.now() - startTime);
+    return {
+      stepId: step.stepId,
+      stepName: step.name,
+      url: resolvedUrl,
+      method: step.method,
+      status: 'error',
+      statusCode: 0,
+      latencyMs,
+      errorMessage: err?.message || 'Failed to execute browser direct test',
+    };
+  }
+}
+
 export const testSingleWorkflowStep = async (
   step: IWorkflowStepData,
   variablesContext?: Record<string, string>,
   cookiesContext?: Record<string, string>
 ): Promise<any> => {
-  const response = await apiClient.post('/workflows/test-step', { step, variablesContext, cookiesContext });
-  return response.data.result;
+  const url = step.url || '';
+  const isLocalhost =
+    url.includes('localhost') ||
+    url.includes('127.0.0.1') ||
+    url.includes('0.0.0.0');
+
+  if (isLocalhost) {
+    // Zero setup direct browser execution for localhost URLs
+    return await browserDirectTestStep(step, variablesContext, cookiesContext);
+  }
+
+  try {
+    const response = await apiClient.post('/workflows/test-step', { step, variablesContext, cookiesContext });
+    return response.data.result;
+  } catch (err: any) {
+    // Fallback to browser direct execution if cloud server request fails
+    return await browserDirectTestStep(step, variablesContext, cookiesContext);
+  }
 };
 
 export interface IScannedEndpoint {

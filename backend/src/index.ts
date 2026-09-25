@@ -76,11 +76,12 @@ app.use('/api/workflows', workflowsRouter);
 app.use('/api/admin', adminRouter);
 
 app.get('/api/health', (req: Request, res: Response) => {
+  console.log("[environment]", process.env.IS_PROD === 'true' ? 'production' : 'development');
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-  });
+  }); 
 });
 
 app.get('/api/hello', (req: Request, res: Response) => {

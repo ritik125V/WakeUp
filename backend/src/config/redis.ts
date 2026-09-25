@@ -13,15 +13,24 @@ export const getRedisClient = (): Redis | null => {
   }
 
   try {
-    redisClient = new Redis(redisUrl, {
+    const isTls = redisUrl.startsWith('rediss://');
+    const redisOptions: any = {
       lazyConnect: true,
       maxRetriesPerRequest: 1, // Fail fast so caller falls back quickly
       enableOfflineQueue: false, // Don't buffer commands when offline
-      retryStrategy(times) {
+      retryStrategy(times: number) {
         // Exponential backoff capped at 30s
         return Math.min(times * 200, 30000);
       },
-    });
+    };
+
+    if (isTls) {
+      redisOptions.tls = {
+        rejectUnauthorized: false,
+      };
+    }
+
+    redisClient = new Redis(redisUrl, redisOptions);
 
     redisClient.on('connect', () => {
       console.log('✅ [Redis]: Connected successfully to Redis.');
