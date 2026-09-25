@@ -55,6 +55,54 @@ router.get('/github-webhook/logs', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET Endpoint for GitHub App Config & Installation URL
+ */
+router.get('/github-app/config', async (req: Request, res: Response) => {
+  const appName = process.env.GITHUB_APP_NAME || 'wakeup-runner';
+  const installUrl = `https://github.com/apps/${appName}/installations/new`;
+
+  res.json({
+    appName,
+    installUrl,
+    enabled: true,
+  });
+});
+
+/**
+ * GET Endpoint for GitHub App Installation Callback
+ * GitHub redirects here after a user authorizes/installs the GitHub App.
+ */
+router.get('/github-app/callback', async (req: Request, res: Response) => {
+  const installationId = (req.query.installation_id as string) || '';
+  const workflowId = (req.query.state as string) || '';
+  const setupAction = (req.query.setup_action as string) || 'install';
+  const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+
+  console.log(`\n[⚡ GITHUB APP CALLBACK] Installation ID: ${installationId} | Workflow: ${workflowId} | Action: ${setupAction}`);
+
+  if (workflowId && workflowId.length === 24) {
+    try {
+      const workflow = await WorkflowModel.findById(workflowId);
+      if (workflow) {
+        workflow.githubInstallationId = installationId;
+        workflow.githubAppConnected = true;
+        workflow.githubEnabled = true;
+        await workflow.save();
+        console.log(`✅ [GITHUB APP LINKED] Workflow "${workflow.name}" linked to Installation ID ${installationId}`);
+      }
+    } catch (err) {
+      console.error('Failed to link GitHub App installation to workflow:', err);
+    }
+  }
+
+  const redirectUrl = workflowId 
+    ? `${frontendUrl}/workflows/${workflowId}?github_app_connected=true` 
+    : `${frontendUrl}/workflows?github_app_connected=true`;
+
+  res.redirect(redirectUrl);
+});
+
+/**
  * PUBLIC UNAUTHENTICATED WEBHOOK: GitHub Push Event Auto-Trigger
  * Called directly by GitHub Webhook servers whenever code is pushed.
  */
@@ -114,16 +162,24 @@ router.post('/github-webhook', async (req: Request, res: Response) => {
   }
 
   try {
+    const installationIdPayload = payload.installation?.id ? String(payload.installation.id) : '';
+
     // Fetch candidate workflows
     const candidateWorkflows = await WorkflowModel.find({
       $or: [
         { githubEnabled: true },
-        { githubSecretToken: tokenQuery && tokenQuery.length > 0 ? tokenQuery : 'non_existent_token_xxx' }
+        { githubSecretToken: tokenQuery && tokenQuery.length > 0 ? tokenQuery : 'non_existent_token_xxx' },
+        { githubInstallationId: installationIdPayload && installationIdPayload.length > 0 ? installationIdPayload : 'non_existent_inst_xxx' }
       ]
     });
 
-    // Flexible Repository & Token Matching Logic
+    // Flexible Repository, Token & App Installation Matching Logic
     const matchingWorkflows = candidateWorkflows.filter((wf) => {
+      // 0. GitHub App Installation ID match
+      if (installationIdPayload && wf.githubInstallationId && wf.githubInstallationId === installationIdPayload) {
+        return true;
+      }
+
       // 1. Secret Token match
       if (tokenQuery && wf.githubSecretToken && wf.githubSecretToken === tokenQuery) {
         return true;

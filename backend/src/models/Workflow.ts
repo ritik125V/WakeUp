@@ -30,6 +30,8 @@ export interface IWorkflow extends Document {
   githubRepo?: string;
   githubBranch?: string;
   githubSecretToken?: string;
+  githubInstallationId?: string;
+  githubAppConnected?: boolean;
   notificationEmail?: string;
   lastTriggeredBy?: string;
   lastTriggeredAt?: Date;
@@ -78,6 +80,8 @@ const workflowSchema = new Schema<IWorkflow>(
       type: String,
       default: () => Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
     },
+    githubInstallationId: { type: String, default: '' },
+    githubAppConnected: { type: Boolean, default: false },
     notificationEmail: { type: String, default: '' },
     lastTriggeredBy: { type: String, default: '' },
     lastTriggeredAt: { type: Date },

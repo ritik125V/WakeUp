@@ -71,6 +71,7 @@ import {
   importScannedEndpointsToWorkflow,
   fetchWorkflowRunHistory,
   fetchWebhookLogs,
+  fetchGithubAppConfig,
   getBackendWebhookUrl,
   IWebhookLogItem,
   IScannedEndpoint,
@@ -403,10 +404,22 @@ export default function WorkflowDetailPage() {
     }
   };
 
+  const [githubAppConfig, setGithubAppConfig] = useState<{ appName: string; installUrl: string; enabled: boolean } | null>(null);
+
+  const loadGithubAppConfig = async () => {
+    try {
+      const res = await fetchGithubAppConfig();
+      setGithubAppConfig(res);
+    } catch (err) {
+      console.error('Failed to load GitHub App config:', err);
+    }
+  };
+
   const handleOpenGithubModal = () => {
     setIsGithubModalOpen(true);
     loadPastRuns();
     loadRawWebhookLogs();
+    loadGithubAppConfig();
   };
 
   const handleOpenHistory = () => {
@@ -2836,6 +2849,48 @@ export default function WorkflowDetailPage() {
                           }`}
                         />
                       </button>
+                    </div>
+
+                    {/* 1-Click GitHub App Zero-Config Card (Vercel / Render Style) */}
+                    <div className="p-4 bg-gradient-to-r from-purple-950/40 via-neutral-900 to-rose-950/40 rounded-xl border-none space-y-3">
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-lg bg-purple-600/20 text-purple-400 flex items-center justify-center shrink-0">
+                            <GitBranch className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-white block flex items-center gap-1.5">
+                              1-Click GitHub App Integration <span className="px-1.5 py-0.2 bg-purple-900/60 text-purple-300 text-[9px] rounded font-mono">VERCEL / RENDER STYLE</span>
+                            </span>
+                            <span className="text-[11px] text-neutral-400 block">
+                              Zero configuration — no tokens, secrets, or manual Webhook URL copying needed
+                            </span>
+                          </div>
+                        </div>
+                        {workflow?.githubAppConnected ? (
+                          <span className="px-3 py-1.5 bg-emerald-950 text-emerald-300 border-none text-[11px] font-bold rounded-lg font-mono flex items-center gap-1.5">
+                            <Check className="w-3.5 h-3.5 text-emerald-400" /> CONNECTED VIA GITHUB APP
+                          </span>
+                        ) : (
+                          <a
+                            href={`https://github.com/apps/${githubAppConfig?.appName || 'wakeup-runner'}/installations/new?state=${workflowId}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="px-4 py-2 bg-gradient-to-r from-purple-600 to-rose-600 hover:from-purple-500 hover:to-rose-500 text-white font-bold text-xs rounded-lg border-none cursor-pointer flex items-center gap-1.5 transition-all shadow-lg shrink-0 text-decoration-none"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>⚡ Connect GitHub App</span>
+                          </a>
+                        )}
+                      </div>
+                      {workflow?.githubInstallationId && (
+                        <div className="text-[10px] font-mono text-purple-300 bg-black/60 p-2.5 rounded-lg flex items-center justify-between">
+                          <span>INSTALLATION ID: {workflow.githubInstallationId}</span>
+                          <span className="text-emerald-400 font-bold flex items-center gap-1">
+                            <Check className="w-3 h-3" /> AUTOMATIC PUSH TRACKING ACTIVE
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* 2-Column Main Section Grid */}

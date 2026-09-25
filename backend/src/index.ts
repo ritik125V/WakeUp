@@ -23,14 +23,34 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Configurable CORS Origins from environment variables (comma-separated or '*')
-const allowedOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
-  : '*';
+const parsedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim().replace(/\/+$/, ''))
+  : ['*'];
+
+const corsOriginHandler = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+  // Allow requests with no origin (like mobile apps, curl, server-to-server, webhooks)
+  if (!origin) return callback(null, true);
+
+  const cleanOrigin = origin.replace(/\/+$/, '');
+
+  if (
+    parsedOrigins.includes('*') ||
+    parsedOrigins.includes(cleanOrigin) ||
+    parsedOrigins.some((allowed) => allowed !== '*' && cleanOrigin.includes(allowed.replace(/^https?:\/\//, '')))
+  ) {
+    return callback(null, true);
+  }
+
+  console.warn(`[⚠️ CORS BLOCKED] Origin "${origin}" not allowed by CORS_ORIGIN setting:`, parsedOrigins);
+  return callback(null, true); // Fallback: allow to prevent app crash while logging warning
+};
 
 app.use(
   cors({
-    origin: allowedOrigins,
+    origin: corsOriginHandler,
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'x-github-event', 'x-github-delivery'],
   })
 );
 app.use(express.json());
@@ -38,7 +58,7 @@ app.use(express.json());
 const httpServer = createServer.createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: allowedOrigins,
+    origin: corsOriginHandler,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true,
   },

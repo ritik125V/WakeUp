@@ -376,6 +376,8 @@ export interface WorkflowData {
   githubRepo?: string;
   githubBranch?: string;
   githubSecretToken?: string;
+  githubInstallationId?: string;
+  githubAppConnected?: boolean;
   notificationEmail?: string;
   lastTriggeredBy?: string;
   lastTriggeredAt?: string;
@@ -850,6 +852,11 @@ export const getBackendWebhookUrl = (secretToken: string = ''): string => {
     baseUrl += '/api';
   }
   return `${baseUrl}/workflows/github-webhook?token=${secretToken}`;
+};
+
+export const fetchGithubAppConfig = async (): Promise<{ appName: string; installUrl: string; enabled: boolean }> => {
+  const response = await apiClient.get<{ appName: string; installUrl: string; enabled: boolean }>('/workflows/github-app/config');
+  return response.data;
 };
 
 
