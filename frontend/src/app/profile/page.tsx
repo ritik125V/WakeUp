@@ -35,6 +35,7 @@ import {
   fetchGroupedEndpoints,
   fetchWorkflows,
   fetchUserGithubStatus,
+  syncUserGithubStatus,
   bindUserGithubInstallationId,
   disconnectUserGithub,
   fetchGithubRepos,
@@ -43,6 +44,8 @@ import {
   IGithubRepoItem,
   UserData,
 } from '@/lib/api';
+import { openGithubAppInstallPopup } from '@/lib/githubPopup';
+import { DynamicPinInput } from '@/components/DynamicPinInput';
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -93,10 +96,10 @@ export default function ProfilePage() {
     }
   };
 
-  const loadGithubInfo = async () => {
+  const loadGithubInfo = async (forceSync: boolean = false) => {
     try {
       const [statusRes, configRes] = await Promise.all([
-        fetchUserGithubStatus().catch(() => null),
+        fetchUserGithubStatus(forceSync).catch(() => null),
         fetchGithubAppConfig().catch(() => null),
       ]);
       if (statusRes) {
@@ -109,6 +112,31 @@ export default function ProfilePage() {
     } catch (e) {
       console.error('Failed to load GitHub info:', e);
     }
+  };
+
+  const handleConnectGithubPopup = () => {
+    const userIdState = user?.id || (user as any)?._id || '';
+    openGithubAppInstallPopup({
+      installUrl: githubAppConfig?.installUrl || 'https://github.com/apps/letsWakeUp/installations/new',
+      state: userIdState,
+      onSuccess: async (data) => {
+        if (data.installationId) {
+          try {
+            await bindUserGithubInstallationId(data.installationId);
+          } catch (e) {
+            console.error('Failed to bind installation ID:', e);
+          }
+        } else {
+          try {
+            await syncUserGithubStatus();
+          } catch (e) {
+            console.error('Failed to sync GitHub installation status:', e);
+          }
+        }
+        setGithubMsg({ type: 'success', text: '✅ GitHub App connected successfully! Repositories synced.' });
+        await loadGithubInfo(true);
+      },
+    });
   };
 
   const handleBindInstallationId = async (e: React.FormEvent) => {
@@ -137,6 +165,7 @@ export default function ProfilePage() {
       setGithubMsg({ type: 'success', text: res.message || 'GitHub App integration disconnected successfully.' });
       setGithubStatus({ githubAppConnected: false, githubInstallationId: '', webhookUrl: '' });
       setConnectedRepos([]);
+      setShowGithubSettingsModal(false);
     } catch (err: any) {
       setGithubMsg({ type: 'error', text: err?.response?.data?.error || 'Failed to disconnect GitHub App' });
     } finally {
@@ -189,7 +218,7 @@ export default function ProfilePage() {
         }
 
         // Load GitHub Integration info & handle auto-bind from callback URL
-        await loadGithubInfo();
+        await loadGithubInfo(false);
 
         if (typeof window !== 'undefined') {
           const params = new URLSearchParams(window.location.search);
@@ -200,7 +229,7 @@ export default function ProfilePage() {
             try {
               const res = await bindUserGithubInstallationId(instId);
               setGithubMsg({ type: 'success', text: res.message || 'GitHub App connected & bound to your account!' });
-              await loadGithubInfo();
+              await loadGithubInfo(true);
             } catch (err: any) {
               setGithubMsg({ type: 'success', text: 'GitHub App authorized & connected successfully!' });
             }
@@ -280,8 +309,8 @@ export default function ProfilePage() {
 
   if (loadingUser) {
     return (
-      <div className="min-h-screen bg-black text-neutral-100 flex items-center justify-center font-mono">
-        <div className="flex items-center gap-2 text-rose-300 text-xs">
+      <div className="min-h-screen bg-black text-neutral-100 flex items-center justify-center font-sans">
+        <div className="flex items-center gap-2 text-rose-300 text-xs font-sans">
           <RefreshCw className="w-4 h-4 animate-spin text-rose-300" /> Loading User Profile...
         </div>
       </div>
@@ -289,7 +318,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-neutral-100 font-mono p-4 sm:p-8">
+    <div className="min-h-screen bg-black text-neutral-100 font-sans px-3.5 sm:px-6 py-4 sm:py-8 touch-manipulation">
       <div className="w-full max-w-4xl mx-auto space-y-6">
         {/* Navigation Header */}
         <div className="flex items-center justify-between border-b border-neutral-900 pb-4">
@@ -298,11 +327,11 @@ export default function ProfilePage() {
               onClick={() => router.push('/')}
               className="inline-flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors mb-1"
             >
-              <ArrowLeft className="w-3.5 h-3.5 text-rose-300" /> Return to Dashboard
+              <ArrowLeft className="w-3.5 h-3.5 text-neutral-400" /> Return to Dashboard
             </button>
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-neutral-900 text-rose-300 text-[10px] rounded-md font-bold uppercase">
-                <UserIcon className="w-3.5 h-3.5 text-rose-300" /> ACCOUNT PROFILE
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-neutral-900 text-neutral-300 text-[10px] rounded-md font-semibold uppercase">
+                <UserIcon className="w-3.5 h-3.5 text-neutral-400" /> ACCOUNT PROFILE
               </span>
             </div>
             <h1 className="text-xl sm:text-2xl font-bold text-white tracking-wide">
@@ -318,44 +347,44 @@ export default function ProfilePage() {
               <span className="text-[10px] text-neutral-400 uppercase block">Registered Endpoints</span>
               <p className="text-xl font-bold text-white mt-0.5">{endpointCount}</p>
             </div>
-            <Server className="w-5 h-5 text-rose-300" />
+            <Server className="w-5 h-5 text-neutral-400" />
           </div>
 
           <div className="p-4 bg-neutral-950 rounded-lg flex items-center justify-between border-none">
             <div>
               <span className="text-[10px] text-neutral-400 uppercase block">Configured Workflows</span>
-              <p className="text-xl font-bold text-rose-300 mt-0.5">{workflowCount}</p>
+              <p className="text-xl font-bold text-white mt-0.5">{workflowCount}</p>
             </div>
-            <Layers className="w-5 h-5 text-rose-300" />
+            <Layers className="w-5 h-5 text-neutral-400" />
           </div>
 
           <div className="p-4 bg-neutral-950 rounded-lg flex items-center justify-between border-none">
             <div>
               <span className="text-[10px] text-neutral-400 uppercase block">Account Security</span>
               <p className="text-xs font-bold text-emerald-400 mt-1 flex items-center gap-1 uppercase">
-                <ShieldCheck className="w-3.5 h-3.5" /> SECURED & ACTIVE
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> SECURED & ACTIVE
               </p>
             </div>
-            <Lock className="w-5 h-5 text-emerald-400" />
+            <Lock className="w-5 h-5 text-neutral-400" />
           </div>
         </div>
 
         {/* User Details & Quick Profile Card */}
-        <div className="p-6 bg-neutral-950 rounded-2xl space-y-4 border-none shadow-md font-mono">
+        <div className="p-6 bg-neutral-950 rounded-2xl space-y-4 border-none shadow-md font-sans">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-neutral-900 border border-neutral-800 text-rose-300 rounded-2xl flex items-center justify-center text-lg font-bold">
+              <div className="w-12 h-12 bg-neutral-900 border border-neutral-800 text-white rounded-2xl flex items-center justify-center text-lg font-bold">
                 {user?.name ? user.name.charAt(0).toUpperCase() : user?.email?.charAt(0).toUpperCase() || 'U'}
               </div>
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
                   <span>{user?.name || 'User Account'}</span>
-                  <span className="px-2 py-0.5 bg-neutral-900 text-rose-300 text-[10px] font-bold uppercase rounded-md border-none">
+                  <span className="px-2 py-0.5 bg-neutral-900 text-neutral-300 text-[10px] font-semibold uppercase rounded-md border-none">
                     {user?.provider?.toUpperCase() || 'CREDENTIALS'}
                   </span>
                 </h2>
                 <p className="text-xs text-neutral-400 flex items-center gap-1 mt-1">
-                  <Mail className="w-3.5 h-3.5 text-neutral-500" /> {user?.email}
+                  <Mail className="w-3.5 h-3.5 text-neutral-400" /> {user?.email}
                 </p>
               </div>
             </div>
@@ -363,9 +392,9 @@ export default function ProfilePage() {
             <button
               type="button"
               onClick={() => setShowAccountSettingsModal(true)}
-              className="px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-neutral-200 hover:text-white text-xs font-bold rounded-xl border-none cursor-pointer transition-colors flex items-center gap-2"
+              className="px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-neutral-200 hover:text-white text-xs font-semibold rounded-xl border-none cursor-pointer transition-colors flex items-center gap-2"
             >
-              <Settings className="w-4 h-4 text-rose-300" />
+              <Settings className="w-4 h-4 text-neutral-400" />
               <span>Edit Profile & Security</span>
             </button>
           </div>
@@ -378,25 +407,25 @@ export default function ProfilePage() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-neutral-950 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-6 border-none shadow-2xl font-mono text-neutral-100"
+              className="bg-neutral-950 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-6 border-none shadow-2xl font-sans text-neutral-100"
             >
               <div className="flex items-center justify-between border-b border-neutral-900 pb-3">
                 <div className="flex items-center gap-2">
-                  <Settings className="w-4 h-4 text-rose-300" />
+                  <Settings className="w-4 h-4 text-neutral-400" />
                   <h3 className="text-sm font-bold uppercase tracking-wider text-white">Profile & Security Settings</h3>
                 </div>
                 <button
                   onClick={() => setShowAccountSettingsModal(false)}
                   className="p-1.5 hover:bg-neutral-900 text-neutral-400 hover:text-white rounded-lg border-none cursor-pointer"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-4 h-4 text-neutral-400" />
                 </button>
               </div>
 
               {/* Edit Display Name Section */}
               <div className="space-y-4">
-                <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                  <UserIcon className="w-3.5 h-3.5 text-rose-300" /> Display Name
+                <h4 className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <UserIcon className="w-3.5 h-3.5 text-neutral-400" /> Display Name
                 </h4>
 
                 {profileMsg && (
@@ -445,8 +474,8 @@ export default function ProfilePage() {
               {/* Change Security PIN Section */}
               <div className="pt-4 border-t border-neutral-900 space-y-4">
                 <div>
-                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                    <KeyRound className="w-3.5 h-3.5 text-rose-300" /> Security PIN Management
+                  <h4 className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-neutral-400" /> Security PIN Management
                   </h4>
                   <p className="text-[11px] text-neutral-400 mt-1">
                     Update your 4-digit Security PIN used for authorization.
@@ -470,51 +499,35 @@ export default function ProfilePage() {
                   </div>
                 )}
 
-                <form onSubmit={handleChangePin} className="space-y-3">
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-neutral-400 font-bold uppercase block">Current Security PIN</label>
-                    <input
-                      type="password"
-                      value={currentPin}
-                      onChange={(e) => setCurrentPin(e.target.value)}
-                      placeholder="••••"
-                      className="w-full px-3.5 py-2 bg-black border-none rounded-xl text-white text-xs outline-none tracking-widest font-mono"
-                    />
-                    <span className="text-[10px] text-neutral-500 block">
-                      Leave blank if setting PIN for the first time.
-                    </span>
-                  </div>
+                <form onSubmit={handleChangePin} className="space-y-4">
+                  <DynamicPinInput
+                    value={currentPin}
+                    onChange={setCurrentPin}
+                    minBoxes={4}
+                    label="Current Security PIN"
+                  />
+                  <p className="text-[10px] text-neutral-500 -mt-2">
+                    Leave blank if setting PIN for the first time.
+                  </p>
 
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-neutral-400 font-bold uppercase block">New Security PIN (Min 4 Digits)</label>
-                    <input
-                      type="password"
-                      value={newPin}
-                      onChange={(e) => setNewPin(e.target.value)}
-                      placeholder="••••"
-                      required
-                      minLength={4}
-                      className="w-full px-3.5 py-2 bg-black border-none rounded-xl text-white text-xs outline-none tracking-widest font-mono"
-                    />
-                  </div>
+                  <DynamicPinInput
+                    value={newPin}
+                    onChange={setNewPin}
+                    minBoxes={4}
+                    label="New Security PIN (Min 4 Digits) *"
+                  />
 
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-neutral-400 font-bold uppercase block">Confirm New Security PIN</label>
-                    <input
-                      type="password"
-                      value={confirmPin}
-                      onChange={(e) => setConfirmPin(e.target.value)}
-                      placeholder="••••"
-                      required
-                      minLength={4}
-                      className="w-full px-3.5 py-2 bg-black border-none rounded-xl text-white text-xs outline-none tracking-widest font-mono"
-                    />
-                  </div>
+                  <DynamicPinInput
+                    value={confirmPin}
+                    onChange={setConfirmPin}
+                    minBoxes={4}
+                    label="Confirm New Security PIN *"
+                  />
 
                   <button
                     type="submit"
-                    disabled={changingPin || !newPin || !confirmPin}
-                    className="w-full py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition-all border-none cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+                    disabled={changingPin || !newPin || newPin.length < 4 || newPin !== confirmPin}
+                    className="w-full py-2 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold rounded-xl transition-all border-none cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 mt-4"
                   >
                     {changingPin ? (
                       <>
@@ -527,26 +540,27 @@ export default function ProfilePage() {
                     )}
                   </button>
                 </form>
+
               </div>
             </motion.div>
           </div>
         )}
 
         {/* Global GitHub App Integration Card */}
-        <div className="p-6 bg-neutral-950 rounded-2xl space-y-4 border-none shadow-md font-mono">
+        <div className="p-6 bg-neutral-950 rounded-2xl space-y-4 border-none shadow-md font-sans">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="space-y-0.5">
-              <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                <GitBranch className="w-4 h-4 text-rose-300" /> GitHub Integration
+              <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2 font-sans">
+                <GitBranch className="w-4 h-4 text-neutral-400" /> GitHub Integration
               </h2>
-              <p className="text-xs text-neutral-400">
+              <p className="text-xs text-neutral-400 font-sans">
                 Automated push triggers for your API monitoring workflows.
               </p>
             </div>
 
             {githubStatus?.githubAppConnected ? (
-              <div className="flex items-center gap-2">
-                <div className="px-3.5 py-1.5 bg-neutral-900 text-emerald-300 text-xs font-bold rounded-xl font-mono flex items-center gap-2 border-none">
+              <div className="flex items-center gap-2 font-sans">
+                <div className="px-3.5 py-1.5 bg-neutral-900 text-emerald-300 text-xs font-semibold rounded-xl font-sans flex items-center gap-2 border-none">
                   <Check className="w-3.5 h-3.5 text-emerald-400" />
                   <span>@{githubStatus.githubUsername || 'ritik125V'}</span>
                 </div>
@@ -556,25 +570,24 @@ export default function ProfilePage() {
                   className="p-2 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white rounded-xl border-none cursor-pointer transition-colors flex items-center justify-center"
                   title="GitHub Integration Settings"
                 >
-                  <Settings className="w-4 h-4" />
+                  <Settings className="w-4 h-4 text-neutral-400" />
                 </button>
               </div>
             ) : (
-              <a
-                href={`${githubAppConfig?.installUrl || 'https://github.com/apps/letsWakeUp/installations/new'}?state=${user?.id || (user as any)?._id || ''}`}
-                target="_blank"
-                rel="noreferrer"
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl border-none cursor-pointer flex items-center gap-2 transition-all text-decoration-none shadow-sm"
+              <button
+                type="button"
+                onClick={handleConnectGithubPopup}
+                className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white font-semibold text-xs rounded-xl border-none cursor-pointer flex items-center gap-2 transition-all shadow-sm font-sans"
               >
                 <Sparkles className="w-3.5 h-3.5 text-white" />
                 <span>Connect GitHub Account</span>
-              </a>
+              </button>
             )}
           </div>
 
           {githubMsg && (
             <div
-              className={`p-3 text-xs rounded-xl flex items-center gap-2 font-mono ${
+              className={`p-3 text-xs rounded-xl flex items-center gap-2 font-sans ${
                 githubMsg.type === 'success'
                   ? 'bg-emerald-950/80 text-emerald-300'
                   : 'bg-rose-950/80 text-rose-300'
@@ -597,18 +610,18 @@ export default function ProfilePage() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-neutral-950 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-5 border-none shadow-2xl font-mono text-neutral-100"
+              className="bg-neutral-950 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-5 border-none shadow-2xl font-sans text-neutral-100"
             >
               <div className="flex items-center justify-between border-b border-neutral-900 pb-3">
                 <div className="flex items-center gap-2">
-                  <Settings className="w-4 h-4 text-rose-300" />
+                  <Settings className="w-4 h-4 text-neutral-400" />
                   <h3 className="text-sm font-bold uppercase tracking-wider text-white">GitHub Settings</h3>
                 </div>
                 <button
                   onClick={() => setShowGithubSettingsModal(false)}
                   className="p-1.5 hover:bg-neutral-900 text-neutral-400 hover:text-white rounded-lg border-none cursor-pointer"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-4 h-4 text-neutral-400" />
                 </button>
               </div>
 
@@ -635,7 +648,7 @@ export default function ProfilePage() {
                 <div className="space-y-3 pt-1">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div className="flex items-center gap-2">
-                      <FolderGit2 className="w-4 h-4 text-rose-300" />
+                      <FolderGit2 className="w-4 h-4 text-neutral-400" />
                       <span className="text-xs font-bold text-white uppercase tracking-wider">
                         Repositories ({connectedRepos.length})
                       </span>

@@ -913,4 +913,44 @@ router.get('/workflow-runs', authenticateToken, requireAdmin, async (req: AuthRe
   }
 });
 
+/**
+ * ADMIN DELETE WORKFLOW RUN AUDIT LOG (Single)
+ */
+router.delete('/workflow-runs/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const run = await WorkflowRunModel.findByIdAndDelete(id);
+    if (!run) {
+      return res.status(404).json({ error: 'Workflow run log not found' });
+    }
+    res.json({ message: 'Workflow run log deleted successfully', id });
+  } catch (error: unknown) {
+    console.error('Error deleting workflow run log:', error);
+    res.status(500).json({ error: 'Failed to delete workflow run log' });
+  }
+});
+
+/**
+ * ADMIN BULK DELETE WORKFLOW RUN AUDIT LOGS
+ */
+router.post('/workflow-runs/delete-bulk', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Array of run IDs is required' });
+    }
+
+    const validIds = ids.filter((id) => Types.ObjectId.isValid(id));
+    const result = await WorkflowRunModel.deleteMany({ _id: { $in: validIds } });
+
+    res.json({
+      message: `Successfully deleted ${result.deletedCount} workflow run audit logs`,
+      deletedCount: result.deletedCount,
+    });
+  } catch (error: unknown) {
+    console.error('Error bulk deleting workflow run logs:', error);
+    res.status(500).json({ error: 'Failed to bulk delete workflow run logs' });
+  }
+});
+
 export default router;

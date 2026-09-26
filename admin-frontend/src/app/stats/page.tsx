@@ -80,15 +80,15 @@ export default function SystemStatsPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-black text-neutral-100 font-sans pb-10">
+    <div className="min-h-screen bg-black text-neutral-100 font-sans pb-10 md:pl-64">
       <AdminNavbar onRefresh={loadAllStats} isRefreshing={loading} isLive={true} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-8 space-y-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-8 space-y-6 py-6">
         {/* Header Title */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-              <Cpu className="w-5 h-5 text-rose-400" /> System Stats & Technical Architecture
+              <Cpu className="w-5 h-5 text-neutral-400" /> System Stats & Technical Architecture
             </h1>
             <p className="text-xs text-neutral-400 mt-0.5">
               Real-time health diagnostics, worker performance metrics, and zero-overhead anomaly detection (Hover over <Info className="w-3 h-3 text-rose-400 inline" /> icons for explanations)

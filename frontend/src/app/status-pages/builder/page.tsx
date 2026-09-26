@@ -181,10 +181,17 @@ function StatusBuilderContent() {
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [createdSlug, setCreatedSlug] = useState<string | null>(null);
+
 
   useEffect(() => {
     async function initData() {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('wakeup_auth_token') : null;
+      if (!token) {
+        router.push('/login');
+        return;
+      }
       setFetching(true);
       try {
         const epData = await fetchGroupedEndpoints();
@@ -298,6 +305,7 @@ function StatusBuilderContent() {
 
     setLoading(true);
     setError(null);
+    setSuccessMsg(null);
 
     const customization: StatusPageCustomization = {
       themePreset,
@@ -351,30 +359,32 @@ function StatusBuilderContent() {
 
     try {
       if (editingPage) {
-        await updateStatusPage(editingPage._id, {
+        const res = await updateStatusPage(editingPage._id, {
           title,
           slug,
           description,
           endpointIds: selectedEndpointIds,
           customization,
         });
-        setCreatedSlug(slug);
+        setEditingPage(res.statusPage);
+        setCreatedSlug(res.statusPage.slug);
+        setSlug(res.statusPage.slug);
+        setSuccessMsg('Status page updated successfully!');
       } else {
-        await createStatusPage({
+        const res = await createStatusPage({
           title,
           slug,
           description,
           endpointIds: selectedEndpointIds,
           customization,
         });
-        setCreatedSlug(slug);
+        setEditingPage(res.statusPage);
+        setCreatedSlug(res.statusPage.slug);
+        setSlug(res.statusPage.slug);
+        setSuccessMsg('Status page published successfully!');
       }
-    } catch (err: unknown) {
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError('Failed to save status page');
-      }
+    } catch (err: any) {
+      setError(err?.response?.data?.error || err?.message || 'Failed to save status page');
     } finally {
       setLoading(false);
     }
@@ -404,15 +414,15 @@ function StatusBuilderContent() {
   return (
     <div className="min-h-[calc(100vh-60px)] bg-black text-neutral-100 flex flex-col font-sans">
       {/* Studio Top Control Bar */}
-      <div className="p-3 sm:px-6 bg-neutral-950 flex items-center justify-between gap-4 shrink-0 border-none">
-        <div className="flex items-center gap-3">
+      <div className="p-3 sm:px-6 bg-neutral-950 flex items-center justify-between gap-3 shrink-0 border-none touch-manipulation">
+        <div className="flex items-center gap-2 sm:gap-3">
           <button
             onClick={() => router.push('/status-pages')}
-            className="p-1.5 text-neutral-400 hover:text-white rounded-lg bg-neutral-900 flex items-center gap-1.5 text-xs font-medium border-none cursor-pointer"
+            className="p-2 sm:px-3 sm:py-2 text-neutral-400 hover:text-white rounded-xl bg-neutral-900 flex items-center gap-1.5 text-xs font-semibold border-none cursor-pointer touch-press min-h-[44px]"
           >
-            <ArrowLeft className="w-4 h-4" /> Back to Pages
+            <ArrowLeft className="w-4 h-4 text-neutral-400" /> <span className="hidden sm:inline">Back to Pages</span>
           </button>
-          <div className="hidden sm:block">
+          <div className="hidden md:block">
             <h1 className="text-xs font-semibold text-white">
               {editingPage ? 'Edit Status Page' : 'Create Status Page'}
             </h1>
@@ -425,23 +435,23 @@ function StatusBuilderContent() {
               href={`/status/${createdSlug}`}
               target="_blank"
               rel="noreferrer"
-              className="px-3 py-1.5 bg-rose-950/60 text-rose-300 text-xs font-medium rounded-lg flex items-center gap-1 hover:underline border-none"
+              className="px-3 py-2 text-rose-300 text-xs font-semibold rounded-xl flex items-center gap-1 hover:underline border-none bg-neutral-900 touch-press min-h-[44px]"
             >
-              View Live Page <ExternalLink className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">View Live</span> Page <ExternalLink className="w-3.5 h-3.5" />
             </a>
           )}
 
           <button
             onClick={handleSubmit}
             disabled={loading || selectedEndpointIds.length === 0}
-            className="px-5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-medium rounded-lg border-none transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            className="px-4 sm:px-5 py-2 min-h-[44px] bg-neutral-800 hover:bg-neutral-700 active:bg-neutral-800 text-white text-xs font-semibold rounded-xl border-none transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 touch-press shadow-md"
           >
             {loading ? (
               'Saving...'
             ) : (
               <>
-                <Sparkles className="w-4 h-4" />
-                {editingPage ? 'Save Changes' : 'Publish Page'}
+                <Sparkles className="w-4 h-4 text-white" />
+                <span>{editingPage ? 'Save Changes' : 'Publish Page'}</span>
               </>
             )}
           </button>
@@ -453,12 +463,12 @@ function StatusBuilderContent() {
         {/* Left Column: Multi-Tab Customization Controls */}
         <div className="w-full lg:w-5/12 flex flex-col bg-neutral-950 overflow-hidden border-none">
           {/* Tabs Navigation Bar */}
-          <div className="flex items-center gap-1 p-2 bg-neutral-900 border-none overflow-x-auto text-xs shrink-0 font-medium">
+          <div className="flex items-center gap-1 p-2 bg-neutral-900 border-none overflow-x-auto text-xs shrink-0 font-medium touch-manipulation">
             <button
               type="button"
               onClick={() => setActiveTab('services')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors border-none ${
-                activeTab === 'services' ? 'bg-rose-950/80 text-rose-300 font-semibold' : 'text-neutral-400 hover:text-white'
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl transition-colors border-none cursor-pointer touch-press ${
+                activeTab === 'services' ? 'bg-neutral-800 text-white font-semibold' : 'text-neutral-400 hover:text-white'
               }`}
             >
               <Layout className="w-3.5 h-3.5" /> Services
@@ -467,7 +477,7 @@ function StatusBuilderContent() {
             <button
               type="button"
               onClick={() => setActiveTab('theme')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors border-none ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl transition-colors border-none cursor-pointer touch-press ${
                 activeTab === 'theme' ? 'bg-rose-950/80 text-rose-300 font-semibold' : 'text-neutral-400 hover:text-white'
               }`}
             >
@@ -508,10 +518,30 @@ function StatusBuilderContent() {
           {/* Form Content Area */}
           <div className="flex-1 overflow-y-auto p-5 space-y-4">
             {error && (
-              <div className="p-3 text-xs bg-rose-950/80 text-rose-300 rounded-xl">
+              <div className="p-3 text-xs bg-rose-950/80 text-rose-300 rounded-xl font-medium">
                 {error}
               </div>
             )}
+
+            {successMsg && (
+              <div className="p-3 text-xs bg-emerald-950/80 text-emerald-300 rounded-xl flex items-center justify-between gap-2 font-medium">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  <span>{successMsg}</span>
+                </div>
+                {createdSlug && (
+                  <a
+                    href={`/status/${createdSlug}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline text-emerald-200 font-bold shrink-0 flex items-center gap-1"
+                  >
+                    View Page <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
+            )}
+
 
             {/* TAB 1: SERVICES & DETAILS */}
             {activeTab === 'services' && (

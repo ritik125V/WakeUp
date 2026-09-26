@@ -153,9 +153,8 @@ router.get('/github-app/callback', async (req: Request, res: Response) => {
     }
   }
 
-  const redirectUrl = linkedWorkflowId 
-    ? `${frontendUrl}/workflows/${linkedWorkflowId}?github_app_connected=true` 
-    : `${frontendUrl}/profile?github_app_connected=true${installationId ? `&installation_id=${installationId}` : ''}`;
+  const targetState = state || linkedWorkflowId || '';
+  const redirectUrl = `${frontendUrl}/workflows/oauth-callback?github_app_connected=true&installation_id=${installationId}&state=${targetState}`;
 
   res.redirect(redirectUrl);
 });
@@ -166,28 +165,117 @@ router.get('/github-app/callback', async (req: Request, res: Response) => {
 router.get('/user/github-status', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
-    let user = userId ? await UserModel.findById(userId).lean() : null;
+    let user = userId && Types.ObjectId.isValid(userId) ? await UserModel.findById(userId) : null;
 
     let githubInstallationId = user?.githubInstallationId || '';
     let githubAppConnected = user?.githubAppConnected || false;
+    let githubUsername = user?.githubUsername || '';
+    const isManuallyDisconnected = user?.githubDisconnected || false;
 
-    // System-wide Fallback: If current user doesn't have githubInstallationId set, check if ANY user or workflow in DB has one!
-    if (!githubInstallationId) {
+    if (isManuallyDisconnected && !githubInstallationId) {
+      return res.json({
+        githubAppConnected: false,
+        githubInstallationId: '',
+        githubUsername: '',
+        webhookUrl: `${(process.env.FRONTEND_URL || 'https://api.wakeup.r8r.in').replace(/\/+$/, '')}/api/workflows/github-webhook`,
+      });
+    }
+
+    // If not connected in DB, check if ANY user or workflow in DB has an installation ID
+    if (!githubInstallationId && !isManuallyDisconnected) {
       const globalUser = await UserModel.findOne({ githubInstallationId: { $exists: true, $ne: '' } }).lean();
       const globalWorkflow = await WorkflowModel.findOne({ githubInstallationId: { $exists: true, $ne: '' } }).lean();
       githubInstallationId = globalUser?.githubInstallationId || globalWorkflow?.githubInstallationId || '';
+      githubUsername = globalUser?.githubUsername || githubUsername;
       githubAppConnected = Boolean(githubInstallationId);
+    }
+
+    // Auto-resolve & Sync from GitHub App API if force sync is requested or if DB installation ID is empty (and user didn't disconnect manually)
+    const forceSync = req.query.sync === 'true' || req.query.forceSync === 'true';
+    if (!isManuallyDisconnected && (!githubInstallationId || !githubAppConnected || forceSync)) {
+      const activeInstalls = await getAppInstallations();
+      if (activeInstalls.length > 0) {
+        const primaryInst = activeInstalls[0];
+        githubInstallationId = String(primaryInst.id);
+        githubAppConnected = true;
+        githubUsername = primaryInst.account?.login || githubUsername || 'ritik125V';
+
+        // Auto-persist in MongoDB so user stays connected across page refreshes
+        if (userId && Types.ObjectId.isValid(userId)) {
+          await UserModel.findByIdAndUpdate(userId, {
+            githubInstallationId,
+            githubAppConnected: true,
+            githubUsername,
+            githubDisconnected: false,
+          });
+        }
+        await UserModel.updateMany(
+          {},
+          { githubInstallationId, githubAppConnected: true, githubUsername, githubDisconnected: false }
+        );
+        await WorkflowModel.updateMany(
+          {},
+          { githubInstallationId, githubAppConnected: true, githubEnabled: true }
+        );
+      }
     }
 
     res.json({
       githubAppConnected,
       githubInstallationId,
-      githubUsername: user?.githubUsername || '',
+      githubUsername: githubUsername || user?.githubUsername || 'ritik125V',
       webhookUrl: `${(process.env.FRONTEND_URL || 'https://api.wakeup.r8r.in').replace(/\/+$/, '')}/api/workflows/github-webhook`,
     });
   } catch (err) {
     console.error('Failed to fetch user GitHub status:', err);
     res.status(500).json({ error: 'Failed to fetch user GitHub status' });
+  }
+});
+
+/**
+ * POST Endpoint: Force Sync Active GitHub App Installations & Persist to DB
+ */
+router.post('/user/github-sync', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const activeInstalls = await getAppInstallations();
+
+    if (activeInstalls.length === 0) {
+      return res.status(404).json({ error: 'No active GitHub App installations found on GitHub for this app.' });
+    }
+
+    const primaryInst = activeInstalls[0];
+    const githubInstallationId = String(primaryInst.id);
+    const githubUsername = primaryInst.account?.login || 'ritik125V';
+
+    if (userId && Types.ObjectId.isValid(userId)) {
+      await UserModel.findByIdAndUpdate(userId, {
+        githubInstallationId,
+        githubAppConnected: true,
+        githubUsername,
+        githubDisconnected: false,
+      });
+    }
+
+    await UserModel.updateMany(
+      {},
+      { githubInstallationId, githubAppConnected: true, githubUsername, githubDisconnected: false }
+    );
+
+    await WorkflowModel.updateMany(
+      {},
+      { githubInstallationId, githubAppConnected: true, githubEnabled: true }
+    );
+
+    res.json({
+      message: 'Successfully synced active GitHub App installation from GitHub!',
+      githubInstallationId,
+      githubAppConnected: true,
+      githubUsername,
+    });
+  } catch (err) {
+    console.error('Failed to sync GitHub App installation:', err);
+    res.status(500).json({ error: 'Failed to sync GitHub App installation' });
   }
 });
 
@@ -207,7 +295,7 @@ router.post('/user/github-bind', authenticateToken, async (req: AuthRequest, res
     if (userId) {
       await UserModel.findByIdAndUpdate(
         userId,
-        { githubInstallationId: cleanId, githubAppConnected: true },
+        { githubInstallationId: cleanId, githubAppConnected: true, githubDisconnected: false },
         { upsert: true, new: true }
       );
     }
@@ -215,7 +303,7 @@ router.post('/user/github-bind', authenticateToken, async (req: AuthRequest, res
     // Update all users and workflows globally so all runners inherit the installation ID
     await UserModel.updateMany(
       {},
-      { githubInstallationId: cleanId, githubAppConnected: true }
+      { githubInstallationId: cleanId, githubAppConnected: true, githubDisconnected: false }
     );
 
     await WorkflowModel.updateMany(
@@ -245,12 +333,14 @@ router.post('/user/github-disconnect', authenticateToken, async (req: AuthReques
         githubInstallationId: '',
         githubAppConnected: false,
         githubUsername: '',
+        githubDisconnected: true,
       });
     }
     await UserModel.updateMany({}, {
       githubInstallationId: '',
       githubAppConnected: false,
       githubUsername: '',
+      githubDisconnected: true,
     });
     await WorkflowModel.updateMany({}, {
       githubInstallationId: '',
@@ -756,6 +846,25 @@ function getGitHubAppJwt(): string | null {
   };
 
   return jwt.sign(payload, privateKey, { algorithm: 'RS256' });
+}
+
+async function getAppInstallations(): Promise<any[]> {
+  const jwtToken = getGitHubAppJwt();
+  if (!jwtToken) return [];
+  try {
+    const res = await axios.get('https://api.github.com/app/installations', {
+      headers: {
+        Authorization: `Bearer ${jwtToken}`,
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'WakeUp-Monitoring-App',
+      },
+      timeout: 5000,
+    });
+    return Array.isArray(res.data) ? res.data : [];
+  } catch (err: any) {
+    console.error('Failed to fetch GitHub App installations from GitHub API:', err?.response?.data || err?.message);
+    return [];
+  }
 }
 
 async function getInstallationAccessToken(installationId: string): Promise<string | null> {

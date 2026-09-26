@@ -31,6 +31,8 @@ import {
   updateAdminWorkflow,
   deleteAdminWorkflow,
   fetchAdminWorkflowRuns,
+  deleteAdminWorkflowRun,
+  bulkDeleteAdminWorkflowRuns,
   AdminWorkflowRecord,
   AdminWorkflowRunRecord,
 } from '@/lib/api';
@@ -51,6 +53,7 @@ function WorkflowsPageContent() {
   }, [searchParams]);
   const [workflows, setWorkflows] = useState<AdminWorkflowRecord[]>([]);
   const [runs, setRuns] = useState<AdminWorkflowRunRecord[]>([]);
+  const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'success' | 'failed'>('all');
@@ -61,6 +64,45 @@ function WorkflowsPageContent() {
   const [isSaving, setIsSaving] = useState(false);
 
   const [inspectRun, setInspectRun] = useState<AdminWorkflowRunRecord | null>(null);
+
+  const handleDeleteRun = async (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!confirm('Are you sure you want to delete this workflow commit audit log?')) return;
+    try {
+      await deleteAdminWorkflowRun(id);
+      setSelectedRunIds((prev) => prev.filter((item) => item !== id));
+      loadData();
+    } catch (err) {
+      console.error('Failed to delete workflow run:', err);
+    }
+  };
+
+  const handleBulkDeleteRuns = async () => {
+    if (selectedRunIds.length === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedRunIds.length} selected commit audit logs?`)) return;
+    try {
+      await bulkDeleteAdminWorkflowRuns(selectedRunIds);
+      setSelectedRunIds([]);
+      loadData();
+    } catch (err) {
+      console.error('Failed to bulk delete workflow runs:', err);
+    }
+  };
+
+  const handleSelectRun = (id: string) => {
+    setSelectedRunIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllRuns = () => {
+    if (selectedRunIds.length === filteredRuns.length) {
+      setSelectedRunIds([]);
+    } else {
+      setSelectedRunIds(filteredRuns.map((r) => r._id));
+    }
+  };
+
 
   const loadData = async () => {
     setLoading(true);
@@ -136,15 +178,15 @@ function WorkflowsPageContent() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-neutral-100 font-sans pb-10">
+    <div className="min-h-screen bg-black text-neutral-100 font-sans pb-10 md:pl-64">
       <AdminNavbar onRefresh={loadData} isRefreshing={loading} isLive={true} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-8 space-y-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-8 space-y-6 py-6">
         {/* Header Title & Main View Switcher Tabs */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-900 pb-4">
           <div>
             <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-              <Layers className="w-5 h-5 text-amber-400" /> Workflows & GitHub Execution Audit
+              <Layers className="w-5 h-5 text-neutral-400" /> Workflows & GitHub Execution Audit
             </h1>
             <p className="text-xs text-neutral-400 mt-0.5">
               Monitor multi-step API journeys, owner details, and GitHub commit execution runs
@@ -289,6 +331,32 @@ function WorkflowsPageContent() {
         {/* TAB 2: GITHUB COMMIT EXECUTION AUDIT LOGS */}
         {activeTab === 'runs' && (
           <div className="space-y-4">
+            {filteredRuns.length > 0 && (
+              <div className="flex items-center justify-between p-3 bg-neutral-950 rounded-xl font-sans text-xs">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={selectedRunIds.length > 0 && selectedRunIds.length === filteredRuns.length}
+                    onChange={handleSelectAllRuns}
+                    className="w-4 h-4 rounded border-none bg-neutral-900 accent-rose-500 cursor-pointer"
+                  />
+                  <span className="text-neutral-400 font-medium">
+                    {selectedRunIds.length > 0 ? `${selectedRunIds.length} Selected` : 'Select All Audit Logs'}
+                  </span>
+                </div>
+
+                {selectedRunIds.length > 0 && (
+                  <button
+                    onClick={handleBulkDeleteRuns}
+                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs rounded-xl transition-all border-none cursor-pointer flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Selected ({selectedRunIds.length})</span>
+                  </button>
+                )}
+              </div>
+            )}
+
             {loading && runs.length === 0 ? (
               <div className="p-16 text-center text-neutral-500 text-xs flex items-center justify-center gap-2 bg-neutral-950 rounded-2xl border border-white/5">
                 <Activity className="w-4 h-4 animate-spin text-rose-400" /> Fetching GitHub Commit Run Audits...
@@ -311,6 +379,13 @@ function WorkflowsPageContent() {
                       {/* Row 1: Header Bar */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-900 pb-3">
                         <div className="flex items-center gap-3 flex-wrap min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={selectedRunIds.includes(run._id)}
+                            onChange={() => handleSelectRun(run._id)}
+                            className="w-4 h-4 rounded border-none bg-neutral-900 accent-rose-500 cursor-pointer shrink-0"
+                          />
+
                           {isPassed ? (
                             <span className="px-2.5 py-1 bg-emerald-950/80 text-emerald-400 text-xs font-bold rounded-lg flex items-center gap-1.5 shrink-0">
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> PASSED
@@ -347,13 +422,22 @@ function WorkflowsPageContent() {
                           </span>
                         </div>
 
-                        <button
-                          onClick={() => setInspectRun(run)}
-                          className="px-3.5 py-1.5 bg-neutral-900 hover:bg-neutral-850 text-neutral-200 hover:text-white font-bold text-xs rounded-xl transition-colors cursor-pointer border-none flex items-center gap-1.5 shrink-0 self-start sm:self-auto"
-                        >
-                          <Eye className="w-3.5 h-3.5 text-rose-300" />
-                          <span>Inspect Step Logs</span>
-                        </button>
+                        <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+                          <button
+                            onClick={() => setInspectRun(run)}
+                            className="px-3.5 py-1.5 bg-neutral-900 hover:bg-neutral-850 text-neutral-200 hover:text-white font-bold text-xs rounded-xl transition-colors cursor-pointer border-none flex items-center gap-1.5"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-rose-300" />
+                            <span>Inspect Step Logs</span>
+                          </button>
+                          <button
+                            onClick={(e) => handleDeleteRun(run._id, e)}
+                            className="p-2 bg-neutral-900 hover:bg-rose-950/60 text-neutral-400 hover:text-rose-400 rounded-xl transition-colors cursor-pointer border-none flex items-center justify-center"
+                            title="Delete Commit Audit Log"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
 
                       {/* Row 2: 4-Column Structured Key Details Grid */}

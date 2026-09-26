@@ -35,8 +35,13 @@ export default function StatusPagesManagementPage() {
   };
 
   useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('wakeup_auth_token') : null;
+    if (!token) {
+      router.push('/login');
+      return;
+    }
     loadData();
-  }, []);
+  }, [router]);
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -58,21 +63,21 @@ export default function StatusPagesManagementPage() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-neutral-100 p-6 sm:p-10 font-sans">
+    <div className="min-h-screen bg-black text-neutral-100 px-3.5 sm:px-6 py-4 sm:py-8 font-sans touch-manipulation">
       <div className="max-w-5xl mx-auto space-y-6">
         
         {/* Sleek Minimal Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">Status Pages</h1>
-            <p className="text-xs text-neutral-400 mt-1">Create and publish status pages for your services</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Status Pages</h1>
+            <p className="text-xs text-neutral-400 mt-0.5">Create and publish status pages for your services</p>
           </div>
 
           <button
             onClick={() => router.push('/status-pages/builder')}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs rounded-lg transition-colors border-none cursor-pointer self-start sm:self-auto shadow-lg shadow-rose-600/10"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] bg-neutral-800 hover:bg-neutral-700 active:bg-neutral-800 text-white font-semibold text-xs rounded-xl transition-all border-none cursor-pointer self-start sm:self-auto shadow-md touch-press"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 text-white" />
             <span>Create Status Page</span>
           </button>
         </div>
@@ -81,7 +86,7 @@ export default function StatusPagesManagementPage() {
         {loading ? (
           <StatusPagesSkeleton />
         ) : statusPages.length === 0 ? (
-          <div className="p-16 bg-neutral-950 rounded-2xl text-center space-y-3 border-none">
+          <div className="p-10 sm:p-16 bg-neutral-950 rounded-2xl text-center space-y-3 border-none">
             <Layout className="w-8 h-8 text-neutral-600 mx-auto" />
             <h3 className="text-sm font-semibold text-white">No status pages yet</h3>
             <p className="text-xs text-neutral-500 max-w-xs mx-auto">
@@ -89,9 +94,9 @@ export default function StatusPagesManagementPage() {
             </p>
             <button
               onClick={() => router.push('/status-pages/builder')}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-medium rounded-lg border-none transition-colors"
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 min-h-[44px] bg-neutral-800 hover:bg-neutral-700 active:bg-neutral-800 text-white text-xs font-semibold rounded-xl border-none transition-colors shadow-md touch-press"
             >
-              <Plus className="w-4 h-4" /> Create Status Page
+              <Plus className="w-4 h-4 text-white" /> Create Status Page
             </button>
           </div>
         ) : (

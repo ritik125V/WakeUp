@@ -15,6 +15,7 @@ All AI agents working on this repository **must read and adhere to** the followi
 | **Architecture & Fallbacks** | [.agents/ARCHITECTURE.md](file:///home/ritikk/Projects/WakeUp/.agents/ARCHITECTURE.md) | Zero hard dependencies, Redis/Mongo fallbacks, $O(\log N)/O(1)$ indexing, 30-Day Incident Storage strategy, HTTP connection pooling, bounded CPU/RAM cron execution. |
 | **Features & Specifications** | [.agents/FEATURES.md](file:///home/ritikk/Projects/WakeUp/.agents/FEATURES.md) | **Flow Runner** (Local browser-direct vs production, Postman UX, cookie inheritance, PDF/MD reports), **API Monitoring** (Cron batching, degradation rules, Redis memory optimization), **Status Pages** (100% customizability, 16/28-digit encoded layout tokens). |
 | **UI & Theme Guidelines** | [.agents/UI_THEME.md](file:///home/ritikk/Projects/WakeUp/.agents/UI_THEME.md) | **Zero Border Policy**, dark mode color depth (`#000000` -> `#0a0a0a` -> `#141414`), no neon/poppy elements, HTTP method badge standards. |
+| **Frontend Guidelines** | [.agents/FRONTEND.md](file:///home/ritikk/Projects/WakeUp/.agents/FRONTEND.md) | **Component Reusability**, dynamic PIN box standards, context-aware CTAs, unauthenticated fallbacks, minimalist UI. |
 | **Agent Guidelines & DOs/DON'Ts** | [.agents/AGENT_GUIDELINES.md](file:///home/ritikk/Projects/WakeUp/.agents/AGENT_GUIDELINES.md) | Mandatory DOs and DON'Ts, explicit admin approval requirements, verification checklist. |
 
 ---

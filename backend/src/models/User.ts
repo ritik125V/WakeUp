@@ -10,6 +10,7 @@ export interface IUser extends Document {
   githubInstallationId?: string;
   githubAppConnected?: boolean;
   githubUsername?: string;
+  githubDisconnected?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -24,6 +25,7 @@ const userSchema = new Schema<IUser>(
     githubInstallationId: { type: String, default: '' },
     githubAppConnected: { type: Boolean, default: false },
     githubUsername: { type: String, default: '' },
+    githubDisconnected: { type: Boolean, default: false },
   },
   {
     timestamps: true,

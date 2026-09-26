@@ -33,6 +33,7 @@ export default function Home() {
   const [totalCount, setTotalCount] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [incidentsMap, setIncidentsMap] = useState<Record<string, IncidentData[]>>({});
 
   // Floating reload pill toast
@@ -72,6 +73,8 @@ export default function Home() {
   };
 
   useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('wakeup_auth_token') : null;
+    setIsLoggedIn(!!token);
     loadData();
   }, []);
 
@@ -101,7 +104,7 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-black text-neutral-100 p-6 sm:p-10 font-sans relative">
+      <div className="min-h-screen bg-black text-neutral-100 px-3.5 sm:px-6 py-4 sm:py-8 font-sans relative">
         <div className="max-w-5xl mx-auto">
           <DashboardSkeleton />
         </div>
@@ -110,7 +113,7 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-neutral-100 p-6 sm:p-10 font-sans relative">
+    <div className="min-h-screen bg-black text-neutral-100 px-3.5 sm:px-6 py-4 sm:py-8 font-sans relative touch-manipulation">
       {/* Floating Micro Refresh Pill */}
       <AnimatePresence>
         {showReloadPill && (
@@ -119,51 +122,51 @@ export default function Home() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             onClick={handleRefresh}
-            className="fixed top-5 right-5 z-50 px-3.5 py-1.5 bg-neutral-900 text-rose-300 text-xs font-mono rounded-full shadow-2xl flex items-center gap-2 cursor-pointer hover:bg-neutral-850 transition-all border-none"
+            className="fixed top-5 right-5 z-50 px-3.5 py-2 bg-neutral-900 text-white text-xs font-sans rounded-full shadow-2xl flex items-center gap-2 cursor-pointer hover:bg-neutral-800 transition-all border-none touch-press"
           >
-            <RefreshCw className="w-3.5 h-3.5 animate-spin text-rose-300" />
+            <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
             <span>New Data Available • Reload</span>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <div className="max-w-5xl mx-auto space-y-8">
+      <div className="max-w-5xl mx-auto space-y-6 sm:space-y-8">
         
         {/* Sleek Minimal Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">Monitored Endpoints</h1>
-            <p className="text-xs text-neutral-400 mt-1">Real-time uptime monitoring and health checks</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Monitored Endpoints</h1>
+            <p className="text-xs text-neutral-400 mt-0.5">Real-time uptime monitoring and health checks</p>
           </div>
 
           <button
-            onClick={() => setIsRegisterOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs rounded-lg transition-colors border-none cursor-pointer self-start sm:self-auto shadow-lg shadow-rose-600/10"
+            onClick={() => (isLoggedIn ? setIsRegisterOpen(true) : router.push('/login'))}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] bg-neutral-800 hover:bg-neutral-700 active:bg-neutral-800 text-white font-semibold text-xs rounded-xl transition-all border-none cursor-pointer self-start sm:self-auto shadow-md touch-press"
           >
-            <Plus className="w-4 h-4" />
-            <span>Register Endpoint</span>
+            <Plus className="w-4 h-4 text-white" />
+            <span>{isLoggedIn ? 'Register Endpoint' : 'Log in to Register Endpoint'}</span>
           </button>
         </div>
 
         {/* Streamlined Stats Summary Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-2 gap-4">
-          <div className="p-4 bg-neutral-950 rounded-2xl flex items-center justify-between shadow-md border-none">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4">
+          <div className="p-3.5 sm:p-4 bg-neutral-950 rounded-2xl flex items-center justify-between shadow-md border-none touch-card">
             <div>
-              <span className="text-xs text-neutral-500 font-medium block">Total Endpoints</span>
-              <p className="text-xl font-bold text-white mt-0.5">{totalCount}</p>
+              <span className="text-[11px] sm:text-xs text-neutral-500 font-medium block">Total Endpoints</span>
+              <p className="text-lg sm:text-xl font-bold text-white mt-0.5">{totalCount}</p>
             </div>
-            <div className="p-2.5 bg-neutral-900 rounded-xl text-neutral-400">
-              <Globe className="w-4 h-4" />
+            <div className="p-2 sm:p-2.5 bg-neutral-900 rounded-xl text-neutral-400">
+              <Globe className="w-4 h-4 text-neutral-400" />
             </div>
           </div>
 
-          <div className="p-4 bg-neutral-950 rounded-2xl flex items-center justify-between shadow-md border-none">
+          <div className="p-3.5 sm:p-4 bg-neutral-950 rounded-2xl flex items-center justify-between shadow-md border-none touch-card">
             <div>
-              <span className="text-xs text-neutral-500 font-medium block">Healthy Services</span>
-              <p className="text-xl font-bold text-emerald-400 mt-0.5">{healthyCount}</p>
+              <span className="text-[11px] sm:text-xs text-neutral-500 font-medium block">Healthy Services</span>
+              <p className="text-lg sm:text-xl font-bold text-emerald-400 mt-0.5">{healthyCount}</p>
             </div>
-            <div className="p-2.5 bg-neutral-900 rounded-xl text-emerald-400">
-              <ShieldCheck className="w-4 h-4" />
+            <div className="p-2 sm:p-2.5 bg-neutral-900 rounded-xl text-neutral-300">
+              <ShieldCheck className="w-4 h-4 text-neutral-300" />
             </div>
           </div>
         </div>
@@ -172,7 +175,7 @@ export default function Home() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-              <Server className="w-4 h-4 text-rose-400" /> Monitored Services
+              <Server className="w-4 h-4 text-neutral-400" /> Monitored Services
             </h2>
             <button
               onClick={handleRefresh}
@@ -192,15 +195,20 @@ export default function Home() {
           ) : Object.keys(groupedData).length === 0 ? (
             <div className="p-16 bg-neutral-950 rounded-2xl text-center space-y-3">
               <Globe className="w-8 h-8 text-neutral-600 mx-auto" />
-              <h3 className="text-sm font-semibold text-white">No endpoints registered</h3>
+              <h3 className="text-sm font-semibold text-white">
+                {isLoggedIn ? 'No endpoints registered' : 'Log in to register an endpoint'}
+              </h3>
               <p className="text-xs text-neutral-500 max-w-xs mx-auto">
-                Add your backend URL to enable automated health checks and incident tracking.
+                {isLoggedIn
+                  ? 'Add your backend URL to enable automated health checks and incident tracking.'
+                  : 'Log in or sign up with Security PIN to register backend endpoints for real-time uptime monitoring.'}
               </p>
               <button
-                onClick={() => setIsRegisterOpen(true)}
+                onClick={() => (isLoggedIn ? setIsRegisterOpen(true) : router.push('/login'))}
                 className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-medium rounded-lg border-none transition-colors"
               >
-                <Plus className="w-4 h-4" /> Register Endpoint
+                <Plus className="w-4 h-4" />
+                <span>{isLoggedIn ? 'Register Endpoint' : 'Log in to Register Endpoint'}</span>
               </button>
             </div>
           ) : (

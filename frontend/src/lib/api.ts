@@ -879,8 +879,24 @@ export interface IUserGithubStatus {
   webhookUrl: string;
 }
 
-export const fetchUserGithubStatus = async (): Promise<IUserGithubStatus> => {
-  const response = await apiClient.get<IUserGithubStatus>('/workflows/user/github-status');
+export const fetchUserGithubStatus = async (forceSync: boolean = false): Promise<IUserGithubStatus> => {
+  const url = forceSync ? '/workflows/user/github-status?sync=true' : '/workflows/user/github-status';
+  const response = await apiClient.get<IUserGithubStatus>(url);
+  return response.data;
+};
+
+export const syncUserGithubStatus = async (): Promise<{
+  message: string;
+  githubInstallationId: string;
+  githubAppConnected: boolean;
+  githubUsername?: string;
+}> => {
+  const response = await apiClient.post<{
+    message: string;
+    githubInstallationId: string;
+    githubAppConnected: boolean;
+    githubUsername?: string;
+  }>('/workflows/user/github-sync');
   return response.data;
 };
 

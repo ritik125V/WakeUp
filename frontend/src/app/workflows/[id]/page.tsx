@@ -74,6 +74,8 @@ import {
   fetchWorkflowRunHistory,
   fetchWebhookLogs,
   fetchGithubAppConfig,
+  bindUserGithubInstallationId,
+  syncUserGithubStatus,
   getBackendWebhookUrl,
   IWebhookLogItem,
   IScannedEndpoint,
@@ -82,6 +84,7 @@ import {
   IWorkflowStepData,
   IWorkflowVariableExtract,
 } from '@/lib/api';
+import { openGithubAppInstallPopup } from '@/lib/githubPopup';
 import { ApiResponseDrawer } from '@/components/ApiResponseDrawer';
 import { AiSpecImportModal } from '@/components/AiSpecImportModal';
 import {
@@ -2976,6 +2979,37 @@ export default function WorkflowDetailPage() {
                               className="pl-8 pr-3 py-1.5 bg-black border-none rounded-xl text-white text-xs outline-none font-mono w-48"
                             />
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              openGithubAppInstallPopup({
+                                installUrl: githubAppConfig?.installUrl || 'https://github.com/apps/letsWakeUp/installations/new',
+                                state: workflowId,
+                                onSuccess: async (data) => {
+                                  if (data.installationId) {
+                                    try {
+                                      await bindUserGithubInstallationId(data.installationId);
+                                    } catch (e) {
+                                      console.error('Failed to bind installation ID:', e);
+                                    }
+                                  } else {
+                                    try {
+                                      await syncUserGithubStatus();
+                                    } catch (e) {
+                                      console.error('Failed to sync GitHub installation status:', e);
+                                    }
+                                  }
+                                  handleFetchGithubRepos();
+                                },
+                              });
+                            }}
+                            className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-750 text-neutral-200 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer border-none flex items-center gap-1.5"
+                            title="Connect or Re-authorize GitHub App"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-rose-300" />
+                            <span>Connect GitHub</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => handleFetchGithubRepos()}

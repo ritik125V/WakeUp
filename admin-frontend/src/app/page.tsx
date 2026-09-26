@@ -178,16 +178,16 @@ export default function AdminDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-neutral-100 font-sans pb-10">
+    <div className="min-h-screen bg-black text-neutral-100 font-sans pb-10 md:pl-64">
       <AdminNavbar onRefresh={loadAdminData} isRefreshing={dataLoading} isLive={true} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-8 space-y-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-8 space-y-6 py-6">
         {/* Cron Worker & Scheduler Status Box */}
         {worker && (
           <div className="p-5 bg-neutral-950 rounded-2xl space-y-4 border-none shadow-md">
             <div className="flex items-center justify-between border-b border-neutral-900 pb-3">
               <div className="flex items-center gap-2">
-                <Cpu className="w-4 h-4 text-rose-400" />
+                <Cpu className="w-4 h-4 text-neutral-400" />
                 <h2 className="text-xs font-bold text-white uppercase tracking-wider">Cron Worker & Scheduler Engine</h2>
               </div>
               <span className="px-2.5 py-0.5 bg-emerald-950 text-emerald-400 text-[10px] font-mono font-bold rounded-full">

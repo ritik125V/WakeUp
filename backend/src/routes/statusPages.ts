@@ -1,42 +1,48 @@
 import { Router, Request, Response } from 'express';
 import { StatusPageModel } from '../models/StatusPage.js';
 import { IncidentModel } from '../models/Incident.js';
+import { authenticateToken, AuthRequest } from '../middleware/authMiddleware.js';
 
 const router = Router();
 
-const getUserId = (req: Request): string => {
-  return (req.headers['x-user-id'] as string) || 'default-user-id';
+const getUserId = (req: AuthRequest): string => {
+  return req.user?.id || (req.headers['x-user-id'] as string) || 'guest-user';
 };
 
 /**
- * Create a new custom status page
+ * Create a new custom status page (Protected)
  */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', authenticateToken as any, async (req: AuthRequest, res: Response) => {
   try {
     const { title, slug, description, endpointIds, customization } = req.body;
     const userId = getUserId(req);
 
-    if (!title || !slug) {
-      return res.status(400).json({ error: 'Title and URL slug are required' });
+    if (!title) {
+      return res.status(400).json({ error: 'Title is required' });
     }
 
-    const cleanSlug = String(slug).toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    let cleanSlug = String(slug || title).toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    if (!cleanSlug) {
+      cleanSlug = `status-${Date.now()}`;
+    }
+
+    // Handle slug collision gracefully by appending a unique random suffix if needed
     const existing = await StatusPageModel.findOne({ slug: cleanSlug });
     if (existing) {
-      return res.status(400).json({ error: 'Status page URL slug already exists' });
+      cleanSlug = `${cleanSlug}-${Math.floor(1000 + Math.random() * 9000)}`;
     }
 
     const statusPage = await StatusPageModel.create({
       userId,
-      title,
+      title: title.trim(),
       slug: cleanSlug,
-      description,
+      description: description ? String(description).trim() : '',
       endpointIds: endpointIds || [],
       customization: customization || {},
       isPublic: true,
     });
 
-    res.status(201).json({ message: 'Status page created successfully', statusPage });
+    res.status(201).json({ message: 'Status page published successfully', statusPage });
   } catch (error: unknown) {
     console.error('Error creating status page:', error);
     res.status(500).json({ error: 'Failed to create status page' });
@@ -44,30 +50,39 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 /**
- * Update an existing status page (customizations, endpoints, title, slug)
+ * Update an existing status page (Protected)
  */
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', authenticateToken as any, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const userId = getUserId(req);
     const { title, slug, description, endpointIds, customization, isPublic } = req.body;
 
-    const page = await StatusPageModel.findOne({ _id: id, userId });
+    const page = await StatusPageModel.findOne({
+      _id: id,
+      $or: [{ userId }, { userId: 'default-user-id' }, { userId: 'guest-user' }],
+    });
+
     if (!page) {
       return res.status(404).json({ error: 'Status page not found or unauthorized' });
     }
 
+    // Auto-claim page ownership if it belonged to default/guest user
+    page.userId = userId;
+
     if (slug && slug !== page.slug) {
-      const cleanSlug = String(slug).toLowerCase().replace(/[^a-z0-9-]/g, '-');
-      const existing = await StatusPageModel.findOne({ slug: cleanSlug, _id: { $ne: id } });
-      if (existing) {
-        return res.status(400).json({ error: 'Status page URL slug already exists' });
+      let cleanSlug = String(slug).toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      if (cleanSlug) {
+        const existing = await StatusPageModel.findOne({ slug: cleanSlug, _id: { $ne: id } });
+        if (existing) {
+          cleanSlug = `${cleanSlug}-${Math.floor(1000 + Math.random() * 9000)}`;
+        }
+        page.slug = cleanSlug;
       }
-      page.slug = cleanSlug;
     }
 
-    if (title !== undefined) page.title = title;
-    if (description !== undefined) page.description = description;
+    if (title !== undefined) page.title = String(title).trim();
+    if (description !== undefined) page.description = String(description).trim();
     if (endpointIds !== undefined) page.endpointIds = endpointIds;
     if (isPublic !== undefined) page.isPublic = isPublic;
     if (customization !== undefined) {
@@ -86,14 +101,18 @@ router.put('/:id', async (req: Request, res: Response) => {
 });
 
 /**
- * Delete a status page
+ * Delete a status page (Protected)
  */
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', authenticateToken as any, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const userId = getUserId(req);
 
-    const page = await StatusPageModel.findOneAndDelete({ _id: id, userId });
+    const page = await StatusPageModel.findOneAndDelete({
+      _id: id,
+      $or: [{ userId }, { userId: 'default-user-id' }, { userId: 'guest-user' }],
+    });
+
     if (!page) {
       return res.status(404).json({ error: 'Status page not found' });
     }
@@ -106,14 +125,17 @@ router.delete('/:id', async (req: Request, res: Response) => {
 });
 
 /**
- * Get all status pages owned by current user
+ * Get all status pages owned by current user (Protected with fallback query for default/guest pages)
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', authenticateToken as any, async (req: AuthRequest, res: Response) => {
   try {
     const userId = getUserId(req);
-    const pages = await StatusPageModel.find({ userId }).populate('endpointIds');
+    const pages = await StatusPageModel.find({
+      $or: [{ userId }, { userId: 'default-user-id' }, { userId: 'guest-user' }],
+    }).populate('endpointIds');
     res.json({ statusPages: pages });
   } catch (error: unknown) {
+    console.error('Error fetching status pages:', error);
     res.status(500).json({ error: 'Failed to fetch status pages' });
   }
 });

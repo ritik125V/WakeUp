@@ -167,7 +167,7 @@ export default function PublicStatusPage() {
   return (
     <div
       style={bgStyle}
-      className={`min-h-screen flex flex-col items-center justify-start p-4 sm:p-8 relative ${fontClass} transition-colors duration-300`}
+      className={`min-h-screen flex flex-col items-center justify-start px-3 sm:px-6 py-4 sm:py-8 relative ${fontClass} transition-colors duration-300 touch-manipulation`}
     >
       {/* Background SVG Tech Pattern Overlay */}
       <StatusPatternOverlay pattern={custom.backgroundPattern || 'grid'} />

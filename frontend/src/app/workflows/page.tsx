@@ -43,8 +43,13 @@ export default function WorkflowsPage() {
   };
 
   useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('wakeup_auth_token') : null;
+    if (!token) {
+      router.push('/login');
+      return;
+    }
     loadWorkflows();
-  }, []);
+  }, [router]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,27 +131,27 @@ export default function WorkflowsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-neutral-100 p-6 sm:p-10 font-sans">
+    <div className="min-h-screen bg-black text-neutral-100 px-3.5 sm:px-6 py-4 sm:py-8 font-sans touch-manipulation">
       <div className="max-w-5xl mx-auto space-y-6">
         
         {/* Sleek Minimal Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">Workflows</h1>
-            <p className="text-xs text-neutral-400 mt-1">Automate and test multi-step API journeys</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Workflows</h1>
+            <p className="text-xs text-neutral-400 mt-0.5">Automate and test multi-step API journeys</p>
           </div>
 
           <button
             onClick={() => setIsCreating(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs rounded-lg transition-colors border-none cursor-pointer self-start sm:self-auto shadow-lg shadow-rose-600/10"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] bg-neutral-800 hover:bg-neutral-700 active:bg-neutral-800 text-white font-semibold text-xs rounded-xl transition-all border-none cursor-pointer self-start sm:self-auto shadow-md touch-press"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 text-white" />
             <span>Create Workflow</span>
           </button>
         </div>
 
         {/* Minimal Search & Count Bar */}
-        <div className="flex items-center justify-between gap-4 bg-neutral-950 p-2.5 rounded-xl">
+        <div className="flex items-center justify-between gap-3 bg-neutral-950 p-2.5 rounded-xl">
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2" />
             <input

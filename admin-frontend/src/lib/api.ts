@@ -345,3 +345,14 @@ export async function fetchAdminWorkflowRuns(params?: { status?: string; repo?: 
   );
   return res.data;
 }
+
+export async function deleteAdminWorkflowRun(id: string) {
+  const res = await adminApiClient.delete<{ message: string }>(`/admin/workflow-runs/${id}`);
+  return res.data;
+}
+
+export async function bulkDeleteAdminWorkflowRuns(ids: string[]) {
+  const res = await adminApiClient.post<{ message: string }>('/admin/workflow-runs/delete-bulk', { ids });
+  return res.data;
+}
+
