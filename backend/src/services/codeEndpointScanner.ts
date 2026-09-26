@@ -157,9 +157,9 @@ async function getEffectiveBranch(owner: string, repo: string, headers: Record<s
   } catch (err: any) {
     const status = err?.response?.status;
     if (status === 401) {
-      throw new Error('GitHub Personal Access Token is invalid or expired.');
+      throw new Error('GitHub authentication failed or access token expired.');
     } else if (status === 403) {
-      throw new Error('GitHub API access forbidden. Ensure your PAT token has the "repo" scope enabled for private repositories.');
+      throw new Error('GitHub API access forbidden or rate limit reached. Ensure your GitHub App is connected.');
     }
 
     // Try repository default_branch
@@ -171,9 +171,9 @@ async function getEffectiveBranch(owner: string, repo: string, headers: Record<s
     } catch (repoErr: any) {
       const repoStatus = repoErr?.response?.status;
       if (repoStatus === 401) {
-        throw new Error('GitHub Personal Access Token is invalid or expired.');
+        throw new Error('GitHub authentication failed or access token expired.');
       } else if (repoStatus === 404) {
-        throw new Error(`GitHub repository "${owner}/${repo}" not found or private. For private repos, ensure your PAT token has the "repo" scope enabled.`);
+        throw new Error(`GitHub repository "${owner}/${repo}" not found or inaccessible. Ensure your GitHub App is connected.`);
       }
     }
     return requestedBranch === 'main' ? 'master' : 'main';
@@ -273,9 +273,9 @@ export async function scanGithubRepositoryEndpoints(
     const status = treeErr?.response?.status;
     console.error('Error fetching git tree from GitHub:', treeErr?.response?.data || treeErr?.message);
     if (status === 404) {
-      throw new Error(`Repository "${repoFullName}" or branch "${activeBranch}" not found. For private repos, ensure your PAT token has the "repo" scope enabled.`);
+      throw new Error(`Repository "${repoFullName}" or branch "${activeBranch}" not found or inaccessible.`);
     } else if (status === 401 || status === 403) {
-      throw new Error(`GitHub API rate limit or authentication error. Please provide a valid PAT token with "repo" scope.`);
+      throw new Error(`GitHub API rate limit or authentication error. Ensure your GitHub App is connected.`);
     }
     throw new Error(`Failed to fetch repository tree: ${treeErr?.response?.data?.message || treeErr?.message}`);
   }
@@ -332,11 +332,11 @@ export async function listGithubRepoFiles(
     const status = err?.response?.status;
     console.error('Error listing repo files from GitHub:', err?.response?.data || err?.message);
     if (status === 404) {
-      throw new Error(`Repository "${repoFullName}" or branch "${activeBranch}" not found. For private repos, ensure your PAT token has the "repo" scope enabled.`);
+      throw new Error(`Repository "${repoFullName}" or branch "${activeBranch}" not found.`);
     } else if (status === 401) {
-      throw new Error('GitHub Personal Access Token is invalid or expired.');
+      throw new Error('GitHub authentication failed or access token expired.');
     } else if (status === 403) {
-      throw new Error('GitHub API rate limit or permission error. Ensure your PAT token has "repo" scope (Classic) or "Contents: Read-only" (Fine-Grained).');
+      throw new Error('GitHub API rate limit or permission error. Ensure your GitHub App is connected.');
     }
     throw new Error(err?.response?.data?.message || err?.message || 'Failed to list repository files from GitHub.');
   }

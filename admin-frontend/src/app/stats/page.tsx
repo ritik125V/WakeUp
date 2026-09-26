@@ -17,6 +17,7 @@ import {
   Shield,
   Gauge,
   Info,
+  Terminal,
 } from 'lucide-react';
 import {
   fetchAdminOverview,
@@ -37,6 +38,16 @@ function InfoTooltip({ text }: { text: string }) {
       </span>
     </span>
   );
+}
+
+function formatUptime(seconds: number): string {
+  if (!seconds || seconds <= 0) return '0m';
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m ${seconds % 60}s`;
 }
 
 export default function SystemStatsPage() {
@@ -64,7 +75,7 @@ export default function SystemStatsPage() {
 
   useEffect(() => {
     loadAllStats();
-    const interval = setInterval(loadAllStats, 5000);
+    const interval = setInterval(loadAllStats, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -94,7 +105,113 @@ export default function SystemStatsPage() {
           </button>
         </div>
 
-        {/* 1. HEALTH SCORE & ANOMALY DETECTOR CARD */}
+        {/* ZERO BACKEND OVERHEAD GUARANTEE BANNER */}
+        <div className="p-3.5 bg-neutral-950 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-neutral-400 font-mono shadow-md border-none">
+          <div className="flex items-center gap-2.5">
+            <Zap className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>
+              <strong className="text-white">Zero Backend Load Guarantee:</strong> Diagnostics use a 3-second server-side TTL cache with non-blocking execution to ensure 0 database load.
+            </span>
+          </div>
+          <span className="text-[10px] text-neutral-500 uppercase font-bold shrink-0 hidden sm:inline px-2 py-1 bg-neutral-900 rounded-md">
+            Auto-refresh: 10s
+          </span>
+        </div>
+
+        {/* 1. HOST MACHINE & HARDWARE INFRASTRUCTURE SPECS */}
+        {diagnostics?.hostSystemInfo && (
+          <motion.div
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-6 bg-neutral-950 rounded-2xl space-y-5 border-none shadow-xl"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-900 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-rose-950/60 text-rose-400 rounded-xl">
+                  <Server className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-white tracking-wide">
+                    Host Machine & Operating System Architecture
+                    <InfoTooltip text="Real physical host hardware specs, CPU topology, kernel release, Node.js process state, and total RAM allocation." />
+                  </h2>
+                  <p className="text-xs text-neutral-400">Target host server specifications running WakeUp backend process</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 bg-neutral-900 text-neutral-300 text-xs font-mono font-bold rounded-lg">
+                  PID: {diagnostics.hostSystemInfo.processPid}
+                </span>
+                <span className="px-3 py-1 bg-emerald-950 text-emerald-400 text-xs font-mono font-bold rounded-lg uppercase">
+                  {diagnostics.hostSystemInfo.platform.toUpperCase()} ({diagnostics.hostSystemInfo.arch})
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+              {/* Box 1: Operating System & Node Runtime */}
+              <div className="p-4 bg-neutral-900/60 rounded-xl space-y-2">
+                <div className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                  <Terminal className="w-3.5 h-3.5 text-rose-300" /> OS & Node Runtime
+                </div>
+                <div className="text-sm font-bold text-white font-mono">
+                  {diagnostics.hostSystemInfo.osType} ({diagnostics.hostSystemInfo.arch})
+                </div>
+                <div className="text-[11px] text-neutral-400 font-mono space-y-0.5">
+                  <div>Kernel: <span className="text-neutral-300">{diagnostics.hostSystemInfo.osRelease}</span></div>
+                  <div>Node Version: <span className="text-rose-300 font-bold">{diagnostics.hostSystemInfo.nodeVersion}</span></div>
+                  <div>Hostname: <span className="text-neutral-300">{diagnostics.hostSystemInfo.hostname}</span></div>
+                </div>
+              </div>
+
+              {/* Box 2: CPU Processor & Cores */}
+              <div className="p-4 bg-neutral-900/60 rounded-xl space-y-2">
+                <div className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                  <Cpu className="w-3.5 h-3.5 text-rose-300" /> CPU Processor Topology
+                </div>
+                <div className="text-xs font-bold text-white font-mono truncate" title={diagnostics.hostSystemInfo.cpuModel}>
+                  {diagnostics.hostSystemInfo.cpuModel}
+                </div>
+                <div className="text-[11px] text-neutral-400 font-mono space-y-0.5">
+                  <div>Hardware Cores: <strong className="text-white">{diagnostics.hostSystemInfo.cpuCores} Cores</strong></div>
+                  <div>Clock Speed: <span className="text-neutral-300">{diagnostics.hostSystemInfo.cpuSpeedMhz} MHz</span></div>
+                  <div>Load Avg: <span className="text-amber-300">{diagnostics.hostSystemInfo.loadAvg.join(' • ')}</span></div>
+                </div>
+              </div>
+
+              {/* Box 3: Real Physical Host RAM Allocation */}
+              <div className="p-4 bg-neutral-900/60 rounded-xl space-y-2">
+                <div className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                  <HardDrive className="w-3.5 h-3.5 text-rose-300" /> Physical Host RAM
+                </div>
+                <div className="text-sm font-bold text-white font-mono">
+                  {(diagnostics.hostSystemInfo.totalPhysicalRamMb / 1024).toFixed(1)} GB Total <span className="text-xs text-neutral-400 font-normal">({diagnostics.hostSystemInfo.totalPhysicalRamMb} MB)</span>
+                </div>
+                <div className="text-[11px] text-neutral-400 font-mono space-y-0.5">
+                  <div>Free System RAM: <span className="text-emerald-400 font-bold">{(diagnostics.hostSystemInfo.freePhysicalRamMb / 1024).toFixed(1)} GB</span></div>
+                  <div>Used System RAM: <span className="text-amber-300 font-bold">{(diagnostics.hostSystemInfo.usedPhysicalRamMb / 1024).toFixed(1)} GB ({diagnostics.hostSystemInfo.physicalRamUsagePercent}%)</span></div>
+                </div>
+              </div>
+
+              {/* Box 4: System & Process Uptime */}
+              <div className="p-4 bg-neutral-900/60 rounded-xl space-y-2">
+                <div className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-rose-300" /> System & Process Uptime
+                </div>
+                <div className="text-sm font-bold text-white font-mono">
+                  {formatUptime(diagnostics.hostSystemInfo.processUptimeSeconds)} <span className="text-xs text-neutral-400 font-normal">(Process)</span>
+                </div>
+                <div className="text-[11px] text-neutral-400 font-mono space-y-0.5">
+                  <div>Host System Uptime: <span className="text-neutral-300">{formatUptime(diagnostics.hostSystemInfo.systemUptimeSeconds)}</span></div>
+                  <div>Distributed Cache: <span className={diagnostics.hostSystemInfo.redisConnected ? 'text-emerald-400 font-bold' : 'text-neutral-400'}>{diagnostics.hostSystemInfo.redisConnected ? 'REDIS ACTIVE' : 'MONGODB STANDBY'}</span></div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* 2. HEALTH SCORE & ANOMALY DETECTOR CARD */}
         {diagnostics && (
           <motion.div
             initial={{ opacity: 0, y: 5 }}

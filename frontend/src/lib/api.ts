@@ -459,6 +459,17 @@ export const fetchGithubRepos = async (query: {
   return response.data;
 };
 
+export const fetchGithubBranches = async (query: {
+  repo: string;
+  token?: string;
+}): Promise<{ repo: string; branches: { name: string; protected: boolean }[]; count: number }> => {
+  const response = await apiClient.get<{ repo: string; branches: { name: string; protected: boolean }[]; count: number }>(
+    '/workflows/github/branches',
+    { params: query }
+  );
+  return response.data;
+};
+
 export const autoCreateGithubWebhook = async (data: {
   repoFullName: string;
   token: string;
@@ -875,6 +886,11 @@ export const fetchUserGithubStatus = async (): Promise<IUserGithubStatus> => {
 
 export const bindUserGithubInstallationId = async (installationId: string): Promise<{ message: string; githubInstallationId: string; githubAppConnected: boolean }> => {
   const response = await apiClient.post<{ message: string; githubInstallationId: string; githubAppConnected: boolean }>('/workflows/user/github-bind', { installationId });
+  return response.data;
+};
+
+export const disconnectUserGithub = async (): Promise<{ message: string }> => {
+  const response = await apiClient.post<{ message: string }>('/workflows/user/github-disconnect');
   return response.data;
 };
 

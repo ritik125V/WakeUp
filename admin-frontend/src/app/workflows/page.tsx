@@ -298,76 +298,126 @@ function WorkflowsPageContent() {
                 No execution run audit logs recorded yet. Connect a workflow to a GitHub repo to track automated commit triggers!
               </div>
             ) : (
-              <div className="space-y-3">
-                {filteredRuns.map((run) => (
-                  <div
-                    key={run._id}
-                    className="p-4 bg-neutral-950 hover:bg-neutral-900/90 rounded-xl space-y-3 border border-white/5 transition-all shadow-md font-mono"
-                  >
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                      <div className="space-y-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {run.summary.overallStatus === 'success' ? (
-                            <span className="px-2.5 py-0.5 bg-emerald-950 text-emerald-400 text-[10px] font-bold rounded flex items-center gap-1">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-400" /> PASSED
+              <div className="space-y-4">
+                {filteredRuns.map((run) => {
+                  const isPassed = run.summary?.overallStatus === 'success' || run.summary?.overallStatus === 'PASSED';
+                  const isUnbound = run.summary?.overallStatus === 'UNBOUND_WEBHOOK';
+
+                  return (
+                    <div
+                      key={run._id}
+                      className="p-5 bg-neutral-950 hover:bg-neutral-900/80 rounded-2xl space-y-4 transition-all shadow-lg border-none"
+                    >
+                      {/* Row 1: Header Bar */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-900 pb-3">
+                        <div className="flex items-center gap-3 flex-wrap min-w-0">
+                          {isPassed ? (
+                            <span className="px-2.5 py-1 bg-emerald-950/80 text-emerald-400 text-xs font-bold rounded-lg flex items-center gap-1.5 shrink-0">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> PASSED
+                            </span>
+                          ) : isUnbound ? (
+                            <span className="px-2.5 py-1 bg-neutral-900 text-neutral-400 text-xs font-bold rounded-lg flex items-center gap-1.5 shrink-0">
+                              <Activity className="w-3.5 h-3.5 text-neutral-400" /> UNBOUND WEBHOOK
                             </span>
                           ) : (
-                            <span className="px-2.5 py-0.5 bg-rose-950 text-rose-400 text-[10px] font-bold rounded flex items-center gap-1">
-                              <XCircle className="w-3 h-3 text-rose-400" /> FAILED
+                            <span className="px-2.5 py-1 bg-rose-950/80 text-rose-400 text-xs font-bold rounded-lg flex items-center gap-1.5 shrink-0">
+                              <XCircle className="w-3.5 h-3.5 text-rose-400" /> FAILED
                             </span>
                           )}
 
-                          <span className="text-white font-bold text-xs">{run.workflowName}</span>
+                          <h3 className="text-sm font-bold text-white truncate max-w-md">{run.workflowName}</h3>
 
-                          {run.triggerSource === 'github_commit' ? (
-                            <span className="px-2 py-0.5 bg-purple-950 text-purple-300 text-[10px] rounded font-bold flex items-center gap-1">
-                              <GitBranch className="w-3 h-3 text-purple-400" /> GitHub Webhook Push
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 bg-blue-950 text-blue-300 text-[10px] rounded font-bold flex items-center gap-1">
-                              <Globe className="w-3 h-3 text-blue-400" /> {run.triggerSource}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Connected Repo & Commit Info */}
-                        <div className="text-xs text-neutral-400 flex items-center gap-3 flex-wrap">
-                          {run.githubRepo && (
-                            <span className="text-amber-300 font-bold flex items-center gap-1">
-                              <GitBranch className="w-3.5 h-3.5 text-amber-400" /> {run.githubRepo}:{run.githubBranch || 'main'}
-                            </span>
-                          )}
-
-                          {run.commitInfo?.commitMsg && (
-                            <span className="text-neutral-300 italic truncate max-w-md flex items-center gap-1">
-                              <GitCommit className="w-3.5 h-3.5 text-neutral-500" /> &quot;{run.commitInfo.commitMsg}&quot;
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3 flex-wrap">
-                        <div className="text-right text-[11px] text-neutral-400 space-y-0.5">
-                          <div className="text-white font-bold flex items-center justify-end gap-1">
-                            <User className="w-3 h-3 text-rose-400" /> {run.owner?.email || 'Owner'}
-                          </div>
-                          <div className="flex items-center justify-end gap-2 text-[10px] text-neutral-500">
-                            <span><Zap className="w-3 h-3 text-amber-400 inline" /> {run.summary.totalTimeMs}ms</span>
-                            <span>{run.summary.successSteps}/{run.summary.totalSteps} steps</span>
-                            <span>{new Date(run.createdAt).toLocaleString()}</span>
-                          </div>
+                          <span className="px-2.5 py-1 bg-neutral-900 text-neutral-300 text-[11px] font-medium rounded-md flex items-center gap-1.5 shrink-0">
+                            {run.triggerSource === 'github_commit' || run.triggerSource === 'unbound_webhook' ? (
+                              <>
+                                <GitBranch className="w-3 h-3 text-rose-300" />
+                                <span>GitHub Push</span>
+                              </>
+                            ) : run.triggerSource === 'browser_direct' ? (
+                              <>
+                                <Globe className="w-3 h-3 text-emerald-400" />
+                                <span>Browser Direct</span>
+                              </>
+                            ) : (
+                              <>
+                                <Zap className="w-3 h-3 text-amber-400" />
+                                <span>{run.triggerSource || 'Manual'}</span>
+                              </>
+                            )}
+                          </span>
                         </div>
 
                         <button
                           onClick={() => setInspectRun(run)}
-                          className="px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-rose-300 font-bold text-xs rounded-lg border border-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
+                          className="px-3.5 py-1.5 bg-neutral-900 hover:bg-neutral-850 text-neutral-200 hover:text-white font-bold text-xs rounded-xl transition-colors cursor-pointer border-none flex items-center gap-1.5 shrink-0 self-start sm:self-auto"
                         >
-                          <Eye className="w-3.5 h-3.5 text-rose-400" /> Inspect Step Logs
+                          <Eye className="w-3.5 h-3.5 text-rose-300" />
+                          <span>Inspect Step Logs</span>
                         </button>
                       </div>
+
+                      {/* Row 2: 4-Column Structured Key Details Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                        {/* Box 1: Repository & Branch */}
+                        <div className="p-3 bg-neutral-900/50 rounded-xl space-y-1">
+                          <div className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                            <GitBranch className="w-3 h-3 text-rose-300" /> Repository & Branch
+                          </div>
+                          <div className="text-xs text-white font-bold truncate">
+                            {run.githubRepo ? `${run.githubRepo}:${run.githubBranch || 'main'}` : 'Unbound Repository'}
+                          </div>
+                          {run.commitInfo?.commitMsg ? (
+                            <div className="text-[11px] text-neutral-400 truncate flex items-center gap-1">
+                              <GitCommit className="w-3 h-3 text-neutral-400 shrink-0" />
+                              <span>&quot;{run.commitInfo.commitMsg}&quot;</span>
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-neutral-400">Direct manual execution</div>
+                          )}
+                        </div>
+
+                        {/* Box 2: Owner / User Info */}
+                        <div className="p-3 bg-neutral-900/50 rounded-xl space-y-1">
+                          <div className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                            <User className="w-3 h-3 text-rose-300" /> User / Owner
+                          </div>
+                          <div className="text-xs text-white font-bold truncate">
+                            {run.owner?.email || 'System Owner'}
+                          </div>
+                          <div className="text-[11px] text-neutral-400 truncate">
+                            {run.owner?.name || 'Workflow Owner'}
+                          </div>
+                        </div>
+
+                        {/* Box 3: Step Execution Breakdown */}
+                        <div className="p-3 bg-neutral-900/50 rounded-xl space-y-1">
+                          <div className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                            <Zap className="w-3 h-3 text-rose-300" /> Step Breakdown
+                          </div>
+                          <div className="text-xs font-bold text-emerald-400">
+                            {run.summary?.successSteps || 0} / {run.summary?.totalSteps || 0} Steps Passed
+                          </div>
+                          <div className="text-[11px] text-neutral-400">
+                            {run.summary?.failedSteps ? `${run.summary.failedSteps} failed step(s)` : '0 failed steps'}
+                          </div>
+                        </div>
+
+                        {/* Box 4: Timing & Duration */}
+                        <div className="p-3 bg-neutral-900/50 rounded-xl space-y-1">
+                          <div className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-rose-300" /> Duration & Timestamp
+                          </div>
+                          <div className="text-xs text-white font-bold">
+                            {run.summary?.totalTimeMs ? `${(run.summary.totalTimeMs / 1000).toFixed(2)}s (${run.summary.totalTimeMs}ms)` : 'N/A'}
+                          </div>
+                          <div className="text-[11px] text-neutral-400">
+                            {new Date(run.createdAt || run.summary?.startedAt || Date.now()).toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

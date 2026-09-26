@@ -227,9 +227,31 @@ export async function bulkResolveAdminIncidents(ids: string[]) {
   return res.data;
 }
 
+export interface HostSystemInfo {
+  platform: string;
+  osType: string;
+  osRelease: string;
+  arch: string;
+  hostname: string;
+  nodeVersion: string;
+  processPid: number;
+  systemUptimeSeconds: number;
+  processUptimeSeconds: number;
+  cpuModel: string;
+  cpuCores: number;
+  cpuSpeedMhz: number;
+  loadAvg: number[];
+  totalPhysicalRamMb: number;
+  freePhysicalRamMb: number;
+  usedPhysicalRamMb: number;
+  physicalRamUsagePercent: number;
+  redisConnected: boolean;
+}
+
 export interface SystemDiagnostics {
   overallStatus: 'OPTIMAL' | 'ELEVATED_LOAD' | 'CRITICAL_OVERWHELM';
   healthScore: number;
+  hostSystemInfo?: HostSystemInfo;
   memory: {
     heapUsedMb: number;
     heapTotalMb: number;
@@ -286,7 +308,7 @@ export interface AdminWorkflowRunRecord {
   workflowId: string;
   userId: string;
   workflowName: string;
-  triggerSource: 'github_commit' | 'manual' | 'browser_direct' | 'api';
+  triggerSource: 'github_commit' | 'manual' | 'browser_direct' | 'api' | 'unbound_webhook' | string;
   githubRepo?: string;
   githubBranch?: string;
   commitInfo?: {
@@ -302,7 +324,7 @@ export interface AdminWorkflowRunRecord {
     successSteps: number;
     failedSteps: number;
     totalTimeMs: number;
-    overallStatus: 'success' | 'failed';
+    overallStatus: 'success' | 'failed' | 'PASSED' | 'FAILED' | 'UNBOUND_WEBHOOK' | string;
     startedAt: string;
     finishedAt: string;
   };

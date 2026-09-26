@@ -1,7 +1,10 @@
 import { Router, Request, Response } from 'express';
+import { Types } from 'mongoose';
 import os from 'os';
 import fs from 'fs';
 import bcrypt from 'bcryptjs';
+
+import { isRedisAvailable } from '../config/redis.js';
 
 /**
  * Helper to detect container instance memory limit (cgroups v1/v2 or MEMORY_LIMIT env)
@@ -33,9 +36,7 @@ function getContainerMemoryLimitMb(): number {
     // Fallback if permission error
   }
 
-  const totalHostMb = Math.round(os.totalmem() / 1024 / 1024);
-  // Default to 512MB container limit if physical host is a large multi-tenant node
-  return totalHostMb > 4096 ? 512 : totalHostMb;
+  return Math.round(os.totalmem() / 1024 / 1024);
 }
 import jwt from 'jsonwebtoken';
 import { UserModel } from '../models/User.js';
@@ -328,10 +329,26 @@ router.post('/endpoints/:id/trigger', authenticateToken, requireAdmin, async (re
  */
 router.get('/workflows', authenticateToken, requireAdmin, async (_req: AuthRequest, res: Response) => {
   try {
-    const workflows = await WorkflowModel.find()
-      .populate('userId', 'email name')
+    const rawWorkflows = await WorkflowModel.find()
       .sort({ createdAt: -1 })
       .lean();
+
+    const userIds = Array.from(new Set(rawWorkflows.map((w) => w.userId).filter(Boolean)));
+    const validObjectIds = userIds.filter((id) => Types.ObjectId.isValid(id));
+
+    const users = await UserModel.find({ _id: { $in: validObjectIds } }).select('email name').lean();
+    const userMap: Record<string, { email: string; name: string }> = {};
+    for (const u of users) {
+      userMap[u._id.toString()] = { email: u.email || '', name: u.name || '' };
+    }
+
+    const workflows = rawWorkflows.map((wf) => ({
+      ...wf,
+      userId: userMap[wf.userId] || {
+        email: wf.notificationEmail || (wf.userId === 'guest-user' ? 'guest@wakeup.dev' : `${wf.userId}@wakeup.dev`),
+        name: 'Workflow Owner',
+      },
+    }));
 
     res.json({ workflows });
   } catch (error: unknown) {
@@ -589,11 +606,20 @@ router.get('/logs', authenticateToken, requireAdmin, async (_req: AuthRequest, r
   }
 });
 
+let cachedDiagnosticsData: any = null;
+let lastDiagnosticsTime = 0;
+const DIAGNOSTICS_CACHE_TTL_MS = 3000;
+
 /**
  * ON-DEMAND SYSTEM HEALTH & ANOMALY DIAGNOSTICS (ZERO BACKGROUND OVERHEAD)
  */
 router.get('/diagnostics', authenticateToken, requireAdmin, async (_req: AuthRequest, res: Response) => {
   try {
+    const now = Date.now();
+    if (cachedDiagnosticsData && now - lastDiagnosticsTime < DIAGNOSTICS_CACHE_TTL_MS) {
+      return res.json({ diagnostics: cachedDiagnosticsData });
+    }
+
     const anomalies: Array<{
       id: string;
       severity: 'info' | 'warn' | 'critical';
@@ -693,19 +719,40 @@ router.get('/diagnostics', authenticateToken, requireAdmin, async (_req: AuthReq
       });
     }
 
-    // 4. System CPU & Host Memory Scaling Measurements
+    // 4. System CPU & Real Physical Host Memory Specs
     const cpus = os.cpus();
     const cpuCoresCount = cpus.length || 1;
     const loadAvg = os.loadavg();
     const cpuLoad1Min = Math.min(100, Math.round(((loadAvg[0] || 0) / cpuCoresCount) * 100));
 
-    const totalSystemRamMb = getContainerMemoryLimitMb();
-    const usedSystemRamMb = Math.round(mem.rss / 1024 / 1024);
-    const freeSystemRamMb = Math.max(0, totalSystemRamMb - usedSystemRamMb);
-    const systemRamUsagePercent = Math.min(100, Math.round((usedSystemRamMb / totalSystemRamMb) * 100));
+    const totalSystemRamMb = Math.round(os.totalmem() / 1024 / 1024);
+    const freeSystemRamMb = Math.round(os.freemem() / 1024 / 1024);
+    const usedSystemRamMb = Math.max(0, totalSystemRamMb - freeSystemRamMb);
+    const systemRamUsagePercent = totalSystemRamMb > 0 ? Math.min(100, Math.round((usedSystemRamMb / totalSystemRamMb) * 100)) : 0;
 
     const processCpu = process.cpuUsage();
     const processCpuTimeMs = Math.round((processCpu.user + processCpu.system) / 1000);
+
+    const hostSystemInfo = {
+      platform: os.platform(),
+      osType: os.type(),
+      osRelease: os.release(),
+      arch: os.arch(),
+      hostname: os.hostname(),
+      nodeVersion: process.version,
+      processPid: process.pid,
+      systemUptimeSeconds: Math.round(os.uptime()),
+      processUptimeSeconds: Math.round(process.uptime()),
+      cpuModel: cpus.length > 0 ? cpus[0].model : 'Generic Host CPU',
+      cpuCores: cpuCoresCount,
+      cpuSpeedMhz: cpus.length > 0 ? cpus[0].speed : 0,
+      loadAvg: loadAvg.map((l) => Number(l.toFixed(2))),
+      totalPhysicalRamMb: totalSystemRamMb,
+      freePhysicalRamMb: freeSystemRamMb,
+      usedPhysicalRamMb: usedSystemRamMb,
+      physicalRamUsagePercent: systemRamUsagePercent,
+      redisConnected: isRedisAvailable(),
+    };
 
     // 5. Scaling Verdict & Recommendation Engine
     let scalingVerdict: 'OPTIMAL_CAPACITY' | 'MODERATE_LOAD' | 'SCALE_UP_RECOMMENDED' = 'OPTIMAL_CAPACITY';
@@ -746,45 +793,49 @@ router.get('/diagnostics', authenticateToken, requireAdmin, async (_req: AuthReq
       });
     }
 
-    res.json({
-      diagnostics: {
-        overallStatus,
-        healthScore: finalScore,
-        memory: {
-          heapUsedMb,
-          heapTotalMb,
-          rssMb,
-          status: memStatus,
-        },
-        database: {
-          queryLatencyMs,
-          status: dbStatus,
-        },
-        services: {
-          total: totalServices,
-          healthy: healthyCount,
-          degraded: degradedCount,
-          down: downCount,
-          failureRatePercent,
-          status: svcStatus,
-        },
-        scaling: {
-          cpuCoresCount,
-          cpuLoad1MinPercent: cpuLoad1Min,
-          processCpuTimeMs,
-          totalSystemRamMb,
-          freeSystemRamMb,
-          usedSystemRamMb,
-          systemRamUsagePercent,
-          verdict: scalingVerdict,
-          message: scalingMessage,
-        },
-        incidents: {
-          activeCount: activeIncidentsCount,
-        },
-        anomaliesDetected: anomalies,
+    const responsePayload = {
+      overallStatus,
+      healthScore: finalScore,
+      hostSystemInfo,
+      memory: {
+        heapUsedMb,
+        heapTotalMb,
+        rssMb,
+        status: memStatus,
       },
-    });
+      database: {
+        queryLatencyMs,
+        status: dbStatus,
+      },
+      services: {
+        total: totalServices,
+        healthy: healthyCount,
+        degraded: degradedCount,
+        down: downCount,
+        failureRatePercent,
+        status: svcStatus,
+      },
+      scaling: {
+        cpuCoresCount,
+        cpuLoad1MinPercent: cpuLoad1Min,
+        processCpuTimeMs,
+        totalSystemRamMb,
+        freeSystemRamMb,
+        usedSystemRamMb,
+        systemRamUsagePercent,
+        verdict: scalingVerdict,
+        message: scalingMessage,
+      },
+      incidents: {
+        activeCount: activeIncidentsCount,
+      },
+      anomaliesDetected: anomalies,
+    };
+
+    cachedDiagnosticsData = responsePayload;
+    lastDiagnosticsTime = Date.now();
+
+    res.json({ diagnostics: responsePayload });
   } catch (error: unknown) {
     console.error('Error computing diagnostics:', error);
     res.status(500).json({ error: 'Failed to compute system health diagnostics' });
@@ -814,7 +865,8 @@ router.get('/workflow-runs', authenticateToken, requireAdmin, async (req: AuthRe
 
     // Collect user IDs to populate owner information
     const userIds = Array.from(new Set(runs.map((r) => r.userId).filter(Boolean)));
-    const users = await UserModel.find({ _id: { $in: userIds } })
+    const validObjectIds = userIds.filter((id) => Types.ObjectId.isValid(id));
+    const users = await UserModel.find({ _id: { $in: validObjectIds } })
       .select('email name')
       .lean();
 

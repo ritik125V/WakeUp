@@ -47,6 +47,7 @@ import {
   Unlock,
   Folder,
   FolderOpen,
+  FolderGit2,
   ChevronRight,
   FileCode,
   FileJson,
@@ -65,6 +66,7 @@ import {
   testSingleWorkflowStep,
   triggerTestGithubPush,
   fetchGithubRepos,
+  fetchGithubBranches,
   autoCreateGithubWebhook,
   fetchGithubRepoFiles,
   scanGithubRepoEndpoints,
@@ -344,6 +346,8 @@ export default function WorkflowDetailPage() {
   const [repoSearchQuery, setRepoSearchQuery] = useState<string>('');
   const [isFetchingRepos, setIsFetchingRepos] = useState<boolean>(false);
   const [repoFetchError, setRepoFetchError] = useState<string | null>(null);
+  const [availableBranches, setAvailableBranches] = useState<string[]>(['main', 'master', 'dev', 'staging']);
+  const [isLoadingBranches, setIsLoadingBranches] = useState<boolean>(false);
   const [isCreatingAutoWebhook, setIsCreatingAutoWebhook] = useState<boolean>(false);
   const [autoWebhookMsg, setAutoWebhookMsg] = useState<string | null>(null);
 
@@ -669,23 +673,26 @@ export default function WorkflowDetailPage() {
     }
   };
 
-  const handleFetchGithubRepos = async () => {
-    if (!githubUserOrToken.trim()) {
-      setRepoFetchError('Please enter a GitHub Username or Personal Access Token');
-      return;
-    }
+  const handleFetchGithubRepos = async (customQuery?: string) => {
     try {
       setIsFetchingRepos(true);
       setRepoFetchError(null);
+      const queryVal = customQuery !== undefined ? customQuery : githubUserOrToken;
+      const cleanVal = queryVal.trim();
       const isToken =
-        githubUserOrToken.startsWith('ghp_') ||
-        githubUserOrToken.startsWith('github_pat_') ||
-        githubUserOrToken.length > 25;
-      const res = await fetchGithubRepos(
-        isToken ? { token: githubUserOrToken.trim() } : { username: githubUserOrToken.trim() }
-      );
+        cleanVal.startsWith('ghp_') ||
+        cleanVal.startsWith('github_pat_') ||
+        cleanVal.length > 25;
+
+      const params = cleanVal
+        ? isToken
+          ? { token: cleanVal }
+          : { username: cleanVal }
+        : {};
+
+      const res = await fetchGithubRepos(params);
       setFetchedRepos(res.repos || []);
-      if (res.repos.length === 0) {
+      if ((res.repos || []).length === 0) {
         setRepoFetchError('No repositories found for this account/token');
       }
     } catch (err: unknown) {
@@ -699,11 +706,53 @@ export default function WorkflowDetailPage() {
     }
   };
 
-  const handleSelectRepo = (repo: IGithubRepoItem) => {
+  const handleSelectRepoAndFetchBranches = async (repo: IGithubRepoItem) => {
     setGithubRepo(repo.full_name);
-    setGithubBranch(repo.default_branch || 'main');
+    const targetBranch = repo.default_branch || 'main';
+    setGithubBranch(targetBranch);
     setGithubEnabled(true);
+
+    setIsLoadingBranches(true);
+    try {
+      const res = await fetchGithubBranches({ repo: repo.full_name, token: githubUserOrToken.trim() });
+      if (res.branches && res.branches.length > 0) {
+        const branchNames = res.branches.map((b) => b.name);
+        if (!branchNames.includes(targetBranch)) {
+          branchNames.unshift(targetBranch);
+        }
+        setAvailableBranches(branchNames);
+      } else {
+        setAvailableBranches([targetBranch, 'main', 'master', 'dev', 'staging']);
+      }
+    } catch (err) {
+      console.error('Failed to fetch branches:', err);
+      setAvailableBranches([targetBranch, 'main', 'master', 'dev', 'staging']);
+    } finally {
+      setIsLoadingBranches(false);
+    }
   };
+
+  useEffect(() => {
+    if (isGithubModalOpen) {
+      if (fetchedRepos.length === 0) {
+        handleFetchGithubRepos();
+      }
+      if (githubRepo) {
+        fetchGithubBranches({ repo: githubRepo, token: githubUserOrToken.trim() })
+          .then((res) => {
+            if (res.branches && res.branches.length > 0) {
+              const branchNames = res.branches.map((b) => b.name);
+              const target = githubBranch || 'main';
+              if (!branchNames.includes(target)) {
+                branchNames.unshift(target);
+              }
+              setAvailableBranches(branchNames);
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [isGithubModalOpen]);
 
   const handleAutoCreateWebhookOnGitHub = async () => {
     if (!githubRepo || !githubUserOrToken) {
@@ -1103,39 +1152,40 @@ export default function WorkflowDetailPage() {
     <div className="min-h-screen bg-black text-neutral-100 font-mono flex flex-col p-3 sm:p-6 space-y-4">
       {/* Responsive Top Header Bar */}
       <div className="w-full flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 border-b border-neutral-900 pb-3">
-        <div className="space-y-1">
+        <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={() => router.push('/workflows')}
-            className="inline-flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors"
+            className="p-1.5 hover:bg-neutral-900 text-neutral-400 hover:text-white rounded-lg transition-colors cursor-pointer border-none flex items-center justify-center shrink-0"
+            title="Back to Workflows"
           >
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to Workflows
+            <ArrowLeft className="w-4 h-4" />
           </button>
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[10px] rounded-md font-bold flex-shrink-0">
-              <Activity className="w-3.5 h-3.5 text-rose-400" /> WORKFLOW BUILDER
-            </div>
+
+          <div className="flex items-center gap-2 min-w-0">
             <input
               type="text"
               value={workflow.name}
               onChange={(e) => setWorkflow({ ...workflow, name: e.target.value })}
-              className="bg-transparent text-base sm:text-xl font-bold text-white tracking-wide border-b border-transparent hover:border-white/20 focus:border-rose-400 focus:outline-none px-1 rounded transition-colors"
+              placeholder="Workflow Title"
+              className="bg-transparent text-sm sm:text-base font-semibold text-white tracking-wide hover:bg-neutral-900/50 focus:bg-neutral-900/80 focus:outline-none px-2 py-1 rounded-md transition-colors border-none"
             />
-            <span className="px-2 py-0.5 bg-neutral-900 text-rose-300 text-[10px] rounded font-bold flex-shrink-0 border border-white/5">
-              {workflow.steps.length} Steps
+            <span className="px-2 py-0.5 bg-neutral-900/70 text-neutral-400 text-xs rounded-md font-mono shrink-0">
+              {workflow.steps.length} {workflow.steps.length === 1 ? 'step' : 'steps'}
             </span>
+          </div>
 
-            {/* Global Base URL Override Control */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setIsBaseUrlPopoverOpen(!isBaseUrlPopoverOpen)}
-                className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 text-[10px] rounded font-bold transition-all cursor-pointer border border-purple-500/30"
-                title="Change Base URL across all workflow steps in 1 click"
-              >
-                <Globe className="w-3 h-3 text-purple-400" />
-                <span className="truncate max-w-[130px]">Base URL: {globalBaseUrl}</span>
-                <ChevronDown className={`w-3 h-3 transition-transform ${isBaseUrlPopoverOpen ? 'rotate-180' : ''}`} />
-              </button>
+          {/* Global Base URL Override Control */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsBaseUrlPopoverOpen(!isBaseUrlPopoverOpen)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-neutral-900/70 hover:bg-neutral-850 text-neutral-300 text-xs rounded-md transition-colors cursor-pointer border-none"
+              title="Change Base URL across all workflow steps in 1 click"
+            >
+              <Globe className="w-3.5 h-3.5 text-neutral-400" />
+              <span className="truncate max-w-[160px] font-mono text-[11px]">Base URL: {globalBaseUrl}</span>
+              <ChevronDown className={`w-3.5 h-3.5 text-neutral-400 transition-transform ${isBaseUrlPopoverOpen ? 'rotate-180' : ''}`} />
+            </button>
 
               <AnimatePresence>
                 {isBaseUrlPopoverOpen && (
@@ -1146,26 +1196,26 @@ export default function WorkflowDetailPage() {
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 8, scale: 0.95 }}
                       transition={{ duration: 0.15 }}
-                      className="absolute left-0 mt-2 w-72 bg-neutral-950 rounded-xl p-3 shadow-2xl z-30 font-mono text-xs space-y-3 border border-white/10 select-none"
+                      className="absolute left-0 mt-2 w-72 bg-neutral-950 rounded-xl p-4 shadow-2xl z-30 font-mono text-xs space-y-3 border-none select-none"
                     >
-                      <div className="flex items-center justify-between border-b border-neutral-900 pb-2">
+                      <div className="flex items-center justify-between border-b border-neutral-900 pb-2.5">
                         <span className="font-bold text-white text-xs flex items-center gap-1.5">
-                          <Globe className="w-3.5 h-3.5 text-purple-400" /> Bulk Base URL Override
+                          <Globe className="w-3.5 h-3.5 text-rose-300" /> Bulk Base URL Override
                         </span>
-                        <span className="text-[9px] text-neutral-400">Frontend Only</span>
+                        <span className="text-[9px] text-neutral-500 font-bold uppercase">FRONTEND OVERRIDE</span>
                       </div>
 
                       <p className="text-[10px] text-neutral-400 leading-relaxed">
                         Switch target server port or environment host across all {workflow.steps.length} workflow steps in 1 click:
                       </p>
 
-                      <div className="space-y-1.5">
+                      <div className="space-y-2">
                         <input
                           type="text"
                           value={globalBaseUrl}
                           onChange={(e) => setGlobalBaseUrl(e.target.value)}
                           placeholder="e.g. http://localhost:5000"
-                          className="w-full bg-neutral-900 text-xs font-mono text-emerald-400 px-3 py-1.5 rounded-lg border border-white/10 focus:outline-none focus:border-purple-400"
+                          className="w-full bg-black text-xs font-mono text-white px-3 py-2 rounded-lg border-none outline-none focus:ring-1 focus:ring-rose-500/50"
                         />
 
                         {/* Presets */}
@@ -1175,7 +1225,7 @@ export default function WorkflowDetailPage() {
                               key={preset}
                               type="button"
                               onClick={() => setGlobalBaseUrl(preset)}
-                              className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 text-purple-300 text-[9px] rounded font-bold transition-colors cursor-pointer border-none"
+                              className="px-2 py-1 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 text-[9px] rounded-md font-bold transition-colors cursor-pointer border-none"
                             >
                               {preset}
                             </button>
@@ -1186,7 +1236,7 @@ export default function WorkflowDetailPage() {
                       <button
                         type="button"
                         onClick={handleApplyBulkBaseUrl}
-                        className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-lg transition-all shadow-md cursor-pointer border-none flex items-center justify-center gap-1.5"
+                        className="w-full py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer border-none flex items-center justify-center gap-1.5 shadow"
                       >
                         <Zap className="w-3.5 h-3.5 fill-current" />
                         <span>Apply to All {workflow.steps.length} Steps</span>
@@ -1195,7 +1245,6 @@ export default function WorkflowDetailPage() {
                   </>
                 )}
               </AnimatePresence>
-            </div>
           </div>
         </div>
 
@@ -1208,11 +1257,11 @@ export default function WorkflowDetailPage() {
                 setIsConfigsMenuOpen(!isConfigsMenuOpen);
                 setIsIntegrationsMenuOpen(false);
               }}
-              className="inline-flex items-center gap-2 px-3 py-2 bg-neutral-900 hover:bg-neutral-850 text-neutral-200 text-xs font-bold rounded-lg border-none transition-colors cursor-pointer"
+              className="inline-flex items-center gap-2 px-3.5 py-2 bg-neutral-900 hover:bg-neutral-850 text-neutral-200 text-xs font-bold rounded-lg border-none transition-colors cursor-pointer"
             >
-              <Settings className="w-3.5 h-3.5 text-purple-400" />
+              <Settings className="w-3.5 h-3.5 text-neutral-400" />
               <span>Configs & Imports</span>
-              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isConfigsMenuOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-3.5 h-3.5 text-neutral-400 transition-transform ${isConfigsMenuOpen ? 'rotate-180' : ''}`} />
             </button>
 
             <AnimatePresence>
@@ -1224,7 +1273,7 @@ export default function WorkflowDetailPage() {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.95 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute right-0 mt-2 w-64 bg-neutral-900 rounded-xl p-1.5 shadow-2xl z-30 font-mono text-xs space-y-1 border-none"
+                    className="absolute right-0 mt-2 w-72 bg-neutral-950 rounded-xl p-1.5 shadow-2xl z-30 font-mono text-xs space-y-1 border-none"
                   >
                     <button
                       type="button"
@@ -1232,14 +1281,12 @@ export default function WorkflowDetailPage() {
                         setIsConfigsMenuOpen(false);
                         setIsBaseUrlPopoverOpen(true);
                       }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-purple-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                      className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-neutral-900 text-neutral-300 hover:text-white flex items-center gap-3 transition-colors cursor-pointer border-none group"
                     >
-                      <Globe className="w-4 h-4 text-purple-400 shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs text-white font-bold flex items-center justify-between">
-                          <span>Bulk Base URL Override</span>
-                        </div>
-                        <div className="text-[10px] text-neutral-400 font-normal">Change target host/port across all steps</div>
+                      <Globe className="w-4 h-4 text-neutral-400 group-hover:text-rose-300 shrink-0 transition-colors" />
+                      <div>
+                        <div className="text-xs text-white font-bold group-hover:text-rose-200 transition-colors">Bulk Base URL Override</div>
+                        <div className="text-[10px] text-neutral-400 font-normal mt-0.5">Change target host/port across all steps</div>
                       </div>
                     </button>
 
@@ -1249,12 +1296,12 @@ export default function WorkflowDetailPage() {
                         setIsConfigsMenuOpen(false);
                         setIsAiSpecModalOpen(true);
                       }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-rose-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                      className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-neutral-900 text-neutral-300 hover:text-white flex items-center gap-3 transition-colors cursor-pointer border-none group"
                     >
-                      <Sparkles className="w-4 h-4 text-rose-400 shrink-0" />
+                      <Sparkles className="w-4 h-4 text-neutral-400 group-hover:text-rose-300 shrink-0 transition-colors" />
                       <div>
-                        <div className="text-xs text-white font-bold">Import via AI Agent (.md)</div>
-                        <div className="text-[10px] text-neutral-400 font-normal">Generate steps from markdown spec file</div>
+                        <div className="text-xs text-white font-bold group-hover:text-rose-200 transition-colors">Import via AI Agent (.md)</div>
+                        <div className="text-[10px] text-neutral-400 font-normal mt-0.5">Generate steps from markdown spec file</div>
                       </div>
                     </button>
 
@@ -1264,12 +1311,12 @@ export default function WorkflowDetailPage() {
                         setIsConfigsMenuOpen(false);
                         handleOpenScanner();
                       }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-cyan-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                      className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-neutral-900 text-neutral-300 hover:text-white flex items-center gap-3 transition-colors cursor-pointer border-none group"
                     >
-                      <Code className="w-4 h-4 text-cyan-400 shrink-0" />
+                      <Code className="w-4 h-4 text-neutral-400 group-hover:text-rose-300 shrink-0 transition-colors" />
                       <div>
-                        <div className="text-xs text-white font-bold">Scan Code Endpoints</div>
-                        <div className="text-[10px] text-neutral-400 font-normal">Extract routes from GitHub or local files</div>
+                        <div className="text-xs text-white font-bold group-hover:text-rose-200 transition-colors">Scan Code Endpoints</div>
+                        <div className="text-[10px] text-neutral-400 font-normal mt-0.5">Extract routes from GitHub or local files</div>
                       </div>
                     </button>
 
@@ -1279,12 +1326,12 @@ export default function WorkflowDetailPage() {
                         setIsConfigsMenuOpen(false);
                         setIsAuthModalOpen(true);
                       }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-amber-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                      className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-neutral-900 text-neutral-300 hover:text-white flex items-center gap-3 transition-colors cursor-pointer border-none group"
                     >
-                      <Key className="w-4 h-4 text-amber-400 shrink-0" />
+                      <Key className="w-4 h-4 text-neutral-400 group-hover:text-rose-300 shrink-0 transition-colors" />
                       <div>
-                        <div className="text-xs text-white font-bold">Auth Step Presets</div>
-                        <div className="text-[10px] text-neutral-400 font-normal">Insert OAuth / Bearer / JWT auth steps</div>
+                        <div className="text-xs text-white font-bold group-hover:text-rose-200 transition-colors">Auth Step Presets</div>
+                        <div className="text-[10px] text-neutral-400 font-normal mt-0.5">Insert OAuth / Bearer / JWT auth steps</div>
                       </div>
                     </button>
 
@@ -1294,12 +1341,12 @@ export default function WorkflowDetailPage() {
                         setIsConfigsMenuOpen(false);
                         handleExportWorkflowJSON();
                       }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-emerald-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                      className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-neutral-900 text-neutral-300 hover:text-white flex items-center gap-3 transition-colors cursor-pointer border-none group"
                     >
-                      <Download className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <Download className="w-4 h-4 text-neutral-400 group-hover:text-rose-300 shrink-0 transition-colors" />
                       <div>
-                        <div className="text-xs text-white font-bold">Export Workflow JSON</div>
-                        <div className="text-[10px] text-neutral-400 font-normal">Download workflow backup JSON file</div>
+                        <div className="text-xs text-white font-bold group-hover:text-rose-200 transition-colors">Export Workflow JSON</div>
+                        <div className="text-[10px] text-neutral-400 font-normal mt-0.5">Download workflow backup JSON file</div>
                       </div>
                     </button>
                   </motion.div>
@@ -1316,16 +1363,12 @@ export default function WorkflowDetailPage() {
                 setIsIntegrationsMenuOpen(!isIntegrationsMenuOpen);
                 setIsConfigsMenuOpen(false);
               }}
-              className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-bold rounded-lg border-none transition-colors cursor-pointer ${
-                workflow?.githubEnabled
-                  ? 'bg-emerald-950 text-emerald-300 hover:bg-emerald-900 border border-emerald-500/30'
-                  : 'bg-neutral-900 hover:bg-neutral-850 text-neutral-200'
-              }`}
+              className="inline-flex items-center gap-2 px-3.5 py-2 bg-neutral-900 hover:bg-neutral-850 text-neutral-200 text-xs font-bold rounded-lg border-none transition-colors cursor-pointer"
             >
-              <GitBranch className="w-3.5 h-3.5 text-emerald-400" />
+              <GitBranch className="w-3.5 h-3.5 text-neutral-400" />
               <span>Integrations & Reports</span>
               {workflow?.githubEnabled && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
-              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isIntegrationsMenuOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-3.5 h-3.5 text-neutral-400 transition-transform ${isIntegrationsMenuOpen ? 'rotate-180' : ''}`} />
             </button>
 
             <AnimatePresence>
@@ -1337,7 +1380,7 @@ export default function WorkflowDetailPage() {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.95 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute right-0 mt-2 w-64 bg-neutral-900 rounded-xl p-1.5 shadow-2xl z-30 font-mono text-xs space-y-1 border-none"
+                    className="absolute right-0 mt-2 w-72 bg-neutral-950 rounded-xl p-1.5 shadow-2xl z-30 font-mono text-xs space-y-1 border-none"
                   >
                     <button
                       type="button"
@@ -1345,11 +1388,11 @@ export default function WorkflowDetailPage() {
                         setIsIntegrationsMenuOpen(false);
                         handleOpenGithubModal();
                       }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-emerald-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                      className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-neutral-900 text-neutral-300 hover:text-white flex items-center gap-3 transition-colors cursor-pointer border-none group"
                     >
-                      <GitBranch className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <GitBranch className="w-4 h-4 text-neutral-400 group-hover:text-rose-300 shrink-0 transition-colors" />
                       <div>
-                        <div className="text-xs text-white font-bold flex items-center gap-1.5">
+                        <div className="text-xs text-white font-bold flex items-center gap-1.5 group-hover:text-rose-200 transition-colors">
                           GitHub Integration Center
                           {workflow?.githubEnabled ? (
                             <span className="text-[9px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-400 rounded font-mono">ACTIVE</span>
@@ -1357,7 +1400,7 @@ export default function WorkflowDetailPage() {
                             <span className="text-[9px] px-1.5 py-0.2 bg-neutral-800 text-neutral-400 rounded font-mono">DISCONNECTED</span>
                           )}
                         </div>
-                        <div className="text-[10px] text-neutral-400 font-normal">Repo binding, webhooks, push tests & scanner</div>
+                        <div className="text-[10px] text-neutral-400 font-normal mt-0.5">Repo binding, webhooks, push tests & scanner</div>
                       </div>
                     </button>
 
@@ -1367,12 +1410,12 @@ export default function WorkflowDetailPage() {
                         setIsIntegrationsMenuOpen(false);
                         handleOpenHistory();
                       }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-purple-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                      className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-neutral-900 text-neutral-300 hover:text-white flex items-center gap-3 transition-colors cursor-pointer border-none group"
                     >
-                      <History className="w-4 h-4 text-purple-400 shrink-0" />
+                      <History className="w-4 h-4 text-neutral-400 group-hover:text-rose-300 shrink-0 transition-colors" />
                       <div>
-                        <div className="text-xs text-white font-bold">Run Execution History</div>
-                        <div className="text-[10px] text-neutral-400 font-normal">View past execution logs & commit triggers</div>
+                        <div className="text-xs text-white font-bold group-hover:text-rose-200 transition-colors">Run Execution History</div>
+                        <div className="text-[10px] text-neutral-400 font-normal mt-0.5">View past execution logs & commit triggers</div>
                       </div>
                     </button>
 
@@ -1382,12 +1425,12 @@ export default function WorkflowDetailPage() {
                         setIsIntegrationsMenuOpen(false);
                         router.push(`/workflows/${workflowId}/report`);
                       }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-rose-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                      className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-neutral-900 text-neutral-300 hover:text-white flex items-center gap-3 transition-colors cursor-pointer border-none group"
                     >
-                      <FileText className="w-4 h-4 text-rose-400 shrink-0" />
+                      <FileText className="w-4 h-4 text-neutral-400 group-hover:text-rose-300 shrink-0 transition-colors" />
                       <div>
-                        <div className="text-xs text-white font-bold">Execution Telemetry Report</div>
-                        <div className="text-[10px] text-neutral-400 font-normal">View step timing, HTTP status & latency breakdown</div>
+                        <div className="text-xs text-white font-bold group-hover:text-rose-200 transition-colors">Execution Telemetry Report</div>
+                        <div className="text-[10px] text-neutral-400 font-normal mt-0.5">View step timing, HTTP status & latency breakdown</div>
                       </div>
                     </button>
 
@@ -1397,12 +1440,12 @@ export default function WorkflowDetailPage() {
                         setIsIntegrationsMenuOpen(false);
                         setIsGuideOpen(true);
                       }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-800 text-amber-300 font-bold flex items-center gap-2 transition-colors cursor-pointer border-none"
+                      className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-neutral-900 text-neutral-300 hover:text-white flex items-center gap-3 transition-colors cursor-pointer border-none group"
                     >
-                      <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                      <Sparkles className="w-4 h-4 text-neutral-400 group-hover:text-rose-300 shrink-0 transition-colors" />
                       <div>
-                        <div className="text-xs text-white font-bold">cURL & SDK Integration Guide</div>
-                        <div className="text-[10px] text-neutral-400 font-normal">cURL, Fetch & Python SDK code snippets</div>
+                        <div className="text-xs text-white font-bold group-hover:text-rose-200 transition-colors">cURL & SDK Integration Guide</div>
+                        <div className="text-[10px] text-neutral-400 font-normal mt-0.5">cURL, Fetch & Python SDK code snippets</div>
                       </div>
                     </button>
                   </motion.div>
@@ -2912,61 +2955,164 @@ export default function WorkflowDetailPage() {
                       );
                     })()}
 
-                    {/* GitHub App Integration Card */}
-                    {workflow?.githubAppConnected || workflow?.githubInstallationId ? (
-                      /* Connected GitHub App Card */
-                      <div className="p-4 bg-neutral-900 rounded-xl space-y-4 border-none">
-                        <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                            <span className="text-xs font-bold text-white uppercase tracking-wider">
-                              GITHUB APP CONNECTED
-                            </span>
-                          </div>
-                          <span className="px-2.5 py-1 bg-emerald-950 text-emerald-300 text-[10px] font-bold rounded font-mono">
-                            AUTOMATION ACTIVE
+                    {/* Repository Grid & Selection Section */}
+                    <div className="space-y-3 p-4 bg-neutral-900 rounded-xl border-none font-mono">
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <FolderGit2 className="w-4 h-4 text-rose-300" />
+                          <span className="text-xs font-bold text-white uppercase tracking-wider">
+                            Select Repository ({fetchedRepos.length})
                           </span>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {/* Click 1: Select Repository */}
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] text-neutral-300 font-bold uppercase block flex items-center justify-between">
-                              <span>1. REPOSITORY</span>
-                              <span className="text-rose-300 font-mono text-[9px]">PUBLIC & PRIVATE</span>
-                            </label>
+                        <div className="flex items-center gap-2">
+                          <div className="relative">
+                            <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-neutral-500" />
                             <input
                               type="text"
-                              value={githubRepo}
-                              onChange={(e) => setGithubRepo(e.target.value)}
-                              placeholder="e.g. ritik125V/WakeUpRunner"
-                              className="w-full px-3.5 py-2.5 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
+                              value={repoSearchQuery}
+                              onChange={(e) => setRepoSearchQuery(e.target.value)}
+                              placeholder="Filter repositories..."
+                              className="pl-8 pr-3 py-1.5 bg-black border-none rounded-xl text-white text-xs outline-none font-mono w-48"
                             />
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => handleFetchGithubRepos()}
+                            className="p-2 bg-black hover:bg-neutral-800 text-neutral-400 hover:text-white rounded-xl border-none cursor-pointer transition-colors"
+                            title="Refresh Repositories"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${isFetchingRepos ? 'animate-spin text-rose-300' : ''}`} />
+                          </button>
+                        </div>
+                      </div>
 
-                          {/* Click 2: Select Branch */}
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] text-neutral-300 font-bold uppercase block flex items-center justify-between">
-                              <span>2. TARGET BRANCH</span>
-                              <span className="text-purple-300 font-mono text-[9px]">QUICK SELECT</span>
-                            </label>
-                            <div className="flex items-center gap-1.5">
-                              <input
-                                type="text"
-                                value={githubBranch}
-                                onChange={(e) => setGithubBranch(e.target.value)}
-                                placeholder="main"
-                                className="flex-1 px-3.5 py-2.5 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
-                              />
-                              {['main', 'master', 'dev', 'staging'].map((b) => (
+                      {isFetchingRepos && fetchedRepos.length === 0 ? (
+                        <div className="p-6 text-center text-neutral-400 text-xs font-mono flex items-center justify-center gap-2 bg-black rounded-xl">
+                          <RefreshCw className="w-4 h-4 animate-spin text-rose-300" /> Loading accessible repositories...
+                        </div>
+                      ) : fetchedRepos.length === 0 ? (
+                        <div className="p-4 bg-black rounded-xl text-neutral-400 text-xs font-mono text-center space-y-1">
+                          <p>No repositories retrieved.</p>
+                          <p className="text-[10px] text-neutral-500">
+                            Connect your GitHub App or enter a PAT token in advanced options below to load your public/private repositories.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto pr-1">
+                          {fetchedRepos
+                            .filter((r) => r.full_name.toLowerCase().includes(repoSearchQuery.toLowerCase()))
+                            .map((repo) => {
+                              const isSelected = githubRepo.toLowerCase() === repo.full_name.toLowerCase();
+                              return (
+                                <div
+                                  key={repo.id}
+                                  onClick={() => handleSelectRepoAndFetchBranches(repo)}
+                                  className={`p-3 rounded-xl flex flex-col justify-between text-xs transition-all cursor-pointer space-y-2 border-none ${
+                                    isSelected
+                                      ? 'bg-rose-950/40 ring-1 ring-rose-500/50 shadow-md'
+                                      : 'bg-black hover:bg-neutral-800/80'
+                                  }`}
+                                >
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className={`font-bold truncate font-mono text-xs ${isSelected ? 'text-rose-200' : 'text-white'}`}>
+                                        {repo.full_name}
+                                      </span>
+                                      <span
+                                        className={`px-1.5 py-0.2 text-[9px] font-bold rounded font-mono shrink-0 ${
+                                          repo.private ? 'bg-amber-950/80 text-amber-300' : 'bg-emerald-950/80 text-emerald-300'
+                                        }`}
+                                      >
+                                        {repo.private ? 'PRIVATE' : 'PUBLIC'}
+                                      </span>
+                                    </div>
+                                    {repo.description && (
+                                      <p className="text-[10px] text-neutral-400 line-clamp-1">{repo.description}</p>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center justify-between pt-1.5 border-t border-neutral-900 text-[10px] text-neutral-400 font-mono">
+                                    <span>
+                                      branch: <strong className="text-white">{repo.default_branch || 'main'}</strong>
+                                    </span>
+                                    <a
+                                      href={repo.html_url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="inline-flex items-center gap-1 text-rose-300 hover:text-white"
+                                    >
+                                      <span>GitHub</span>
+                                      <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Target Branch & Automation Config Card */}
+                    <div className="p-4 bg-neutral-900 rounded-xl space-y-4 border-none font-mono">
+                      <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                          <span className="text-xs font-bold text-white uppercase tracking-wider">
+                            TARGET BRANCH & AUTOMATION SETTINGS
+                          </span>
+                        </div>
+                        <span className="px-2.5 py-1 bg-emerald-950 text-emerald-300 text-[10px] font-bold rounded font-mono">
+                          AUTOMATION ACTIVE
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* 1. Selected Repository */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] text-neutral-300 font-bold uppercase block flex items-center justify-between">
+                            <span>1. SELECTED REPOSITORY</span>
+                            <span className="text-rose-300 font-mono text-[9px]">PUBLIC & PRIVATE</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={githubRepo}
+                            onChange={(e) => {
+                              setGithubRepo(e.target.value);
+                              setGithubEnabled(true);
+                            }}
+                            placeholder="e.g. ritik125V/WakeUpRunner"
+                            className="w-full px-3.5 py-2.5 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
+                          />
+                        </div>
+
+                        {/* 2. Select Branch */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] text-neutral-300 font-bold uppercase block flex items-center justify-between">
+                            <span>2. TARGET BRANCH</span>
+                            <span className="text-rose-300 font-mono text-[9px]">
+                              {isLoadingBranches ? 'FETCHING BRANCHES...' : 'SELECT BRANCH'}
+                            </span>
+                          </label>
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={githubBranch}
+                              onChange={(e) => setGithubBranch(e.target.value)}
+                              placeholder="main"
+                              className="w-full px-3.5 py-2.5 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
+                            />
+                            <div className="flex items-center gap-1.5 flex-wrap max-h-24 overflow-y-auto">
+                              {availableBranches.map((b) => (
                                 <button
                                   key={b}
                                   type="button"
                                   onClick={() => setGithubBranch(b)}
-                                  className={`px-2.5 py-2.5 text-[10px] rounded-lg font-mono border-none cursor-pointer transition-all ${
+                                  className={`px-2.5 py-1.5 text-[10px] rounded-lg font-mono border-none cursor-pointer transition-all ${
                                     githubBranch === b
-                                      ? 'bg-purple-600 text-white font-bold'
-                                      : 'bg-neutral-800 text-neutral-400 hover:text-white'
+                                      ? 'bg-rose-600 text-white font-bold shadow'
+                                      : 'bg-black text-neutral-400 hover:text-white hover:bg-neutral-800'
                                   }`}
                                 >
                                   {b}
@@ -2975,66 +3121,38 @@ export default function WorkflowDetailPage() {
                             </div>
                           </div>
                         </div>
-
-                        {/* Email Alerts & Auto-Scan Buttons */}
-                        <div className="space-y-3 pt-2 border-t border-purple-900/30">
-                          <div className="space-y-1">
-                            <label className="text-[10px] text-rose-300 uppercase font-bold block flex items-center gap-1">
-                              <Key className="w-3 h-3 text-rose-400" /> Commit Execution Report Email
-                            </label>
-                            <input
-                              type="email"
-                              value={notificationEmail}
-                              onChange={(e) => setNotificationEmail(e.target.value)}
-                              placeholder="e.g. dev-alerts@company.com"
-                              className="w-full px-3 py-2 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
-                            />
-                          </div>
-
-                          {githubRepo && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsGithubModalOpen(false);
-                                handleOpenScanner();
-                              }}
-                              className="w-full py-2.5 bg-gradient-to-r from-rose-600 to-purple-600 hover:from-rose-500 hover:to-purple-500 text-white font-bold text-xs rounded-lg border-none cursor-pointer flex items-center justify-center gap-1.5 shadow-lg"
-                            >
-                              <Sparkles className="w-3.5 h-3.5" />
-                              <span>⚡ Scan & Auto-Import Endpoints from {githubRepo}</span>
-                            </button>
-                          )}
-                        </div>
                       </div>
-                    ) : (
-                      /* Connect GitHub App Card when not connected (Subtle & Elegant) */
-                      <div className="p-3.5 bg-neutral-900 rounded-xl border-none space-y-2">
-                        <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-lg bg-neutral-800 text-neutral-300 flex items-center justify-center shrink-0">
-                              <GitBranch className="w-4 h-4 text-purple-400" />
-                            </div>
-                            <div>
-                              <span className="text-xs font-bold text-white block">
-                                Connect GitHub App
-                              </span>
-                              <span className="text-[11px] text-neutral-400 block">
-                                Auto-sync public & private repositories — no PAT or token copying needed
-                              </span>
-                            </div>
-                          </div>
-                          <a
-                            href={`https://github.com/apps/${githubAppConfig?.appName || 'letsWakeUp'}/installations/new?state=${workflowId}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="px-3.5 py-2 bg-neutral-800 hover:bg-neutral-750 text-neutral-200 hover:text-white font-medium text-xs rounded-lg border-none cursor-pointer flex items-center gap-1.5 transition-all text-decoration-none shrink-0"
+
+                      {/* Email Alerts & Auto-Scan Buttons */}
+                      <div className="space-y-3 pt-3 border-t border-neutral-800">
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-rose-300 uppercase font-bold block flex items-center gap-1">
+                            <Key className="w-3 h-3 text-rose-400" /> Commit Execution Report Email
+                          </label>
+                          <input
+                            type="email"
+                            value={notificationEmail}
+                            onChange={(e) => setNotificationEmail(e.target.value)}
+                            placeholder="e.g. dev-alerts@company.com"
+                            className="w-full px-3 py-2 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
+                          />
+                        </div>
+
+                        {githubRepo && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsGithubModalOpen(false);
+                              handleOpenScanner();
+                            }}
+                            className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg border-none cursor-pointer flex items-center justify-center gap-1.5 shadow-lg transition-colors"
                           >
-                            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                            <span>Connect GitHub App</span>
-                          </a>
-                        </div>
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>⚡ Scan & Auto-Import Endpoints from {githubRepo}</span>
+                          </button>
+                        )}
                       </div>
-                    )}
+                    </div>
 
                     {/* Advanced / Manual Webhook & Username Fetcher Collapsible */}
                     <div className="pt-2">
@@ -3064,7 +3182,7 @@ export default function WorkflowDetailPage() {
                                 />
                                 <button
                                   type="button"
-                                  onClick={handleFetchGithubRepos}
+                                  onClick={() => handleFetchGithubRepos()}
                                   disabled={isFetchingRepos || !githubUserOrToken.trim()}
                                   className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg border-none cursor-pointer flex items-center gap-1.5 shrink-0 disabled:opacity-50"
                                 >
@@ -3132,10 +3250,10 @@ export default function WorkflowDetailPage() {
                                     return (
                                       <div
                                         key={repo.id}
-                                        onClick={() => handleSelectRepo(repo)}
+                                        onClick={() => handleSelectRepoAndFetchBranches(repo)}
                                         className={`p-2.5 rounded-lg cursor-pointer transition-all flex items-center justify-between text-xs ${
                                           isSelected
-                                            ? 'bg-purple-900/40 text-white font-bold'
+                                            ? 'bg-rose-950/50 text-white font-bold'
                                             : 'bg-black hover:bg-neutral-950 text-neutral-300'
                                         }`}
                                       >
@@ -3541,13 +3659,13 @@ export default function WorkflowDetailPage() {
               {/* Modal Header */}
               <div className="flex items-center justify-between pb-4 border-b border-neutral-900">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-purple-950 text-purple-400 flex items-center justify-center font-bold">
-                    <Sparkles className="w-5 h-5 text-purple-400" />
+                  <div className="w-10 h-10 rounded-xl bg-rose-950 text-rose-300 flex items-center justify-center font-bold">
+                    <Sparkles className="w-5 h-5 text-rose-300" />
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-white tracking-wide flex items-center gap-2">
                       Code Endpoint Scanner & Step Builder
-                      <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 text-[10px] rounded font-mono font-bold">AST PARSER</span>
+                      <span className="px-2 py-0.5 bg-rose-500/20 text-rose-300 text-[10px] rounded font-mono font-bold">AST PARSER</span>
                     </h3>
                     <span className="text-xs text-neutral-400 block mt-0.5">
                       Extract API routes from your repository or local code files and auto-import them as workflow steps
@@ -3569,7 +3687,7 @@ export default function WorkflowDetailPage() {
                   onClick={() => setScannerSourceTab('github')}
                   className={`flex-1 py-2.5 px-4 rounded-lg text-xs font-bold border-none cursor-pointer flex items-center justify-center gap-2 transition-colors ${
                     scannerSourceTab === 'github'
-                      ? 'bg-purple-600 text-white shadow-md'
+                      ? 'bg-rose-600 text-white shadow-md'
                       : 'bg-transparent text-neutral-400 hover:text-white'
                   }`}
                 >
@@ -3585,7 +3703,7 @@ export default function WorkflowDetailPage() {
                   }}
                   className={`flex-1 py-2.5 px-4 rounded-lg text-xs font-bold border-none cursor-pointer flex items-center justify-center gap-2 transition-colors ${
                     scannerSourceTab === 'local'
-                      ? 'bg-purple-600 text-white shadow-md'
+                      ? 'bg-rose-600 text-white shadow-md'
                       : 'bg-transparent text-neutral-400 hover:text-white'
                   }`}
                 >
@@ -3601,13 +3719,13 @@ export default function WorkflowDetailPage() {
                     <span className="text-xs font-bold text-white flex items-center gap-2">
                       <Laptop className="w-4 h-4 text-emerald-400" /> Select Local Code Files or Project Folder
                     </span>
-                    <span className="text-[10px] text-purple-300 font-mono">CLIENT-SIDE AST PARSER</span>
+                    <span className="text-[10px] text-rose-300 font-mono">CLIENT-SIDE AST PARSER</span>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {/* Upload Individual/Multiple Files */}
                     <label className="p-6 bg-black hover:bg-neutral-950 rounded-xl cursor-pointer flex flex-col items-center justify-center gap-2.5 text-center transition-colors border-none group">
-                      <Upload className="w-6 h-6 text-purple-400 group-hover:scale-110 transition-transform" />
+                      <Upload className="w-6 h-6 text-rose-400 group-hover:scale-110 transition-transform" />
                       <div>
                         <span className="text-xs font-bold text-white block">Select Code Files</span>
                         <span className="text-[11px] text-neutral-400 block mt-0.5">Pick .ts, .js, .py, .go, .json files</span>
@@ -3645,7 +3763,7 @@ export default function WorkflowDetailPage() {
               {scannerSourceTab === 'github' && (
                 <div className="space-y-4">
                   <div className="p-5 bg-neutral-900 rounded-xl space-y-3 border-none">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-1">
                         <label className="text-[10px] text-neutral-300 font-bold uppercase block">
                           GitHub Repository (owner/repo)
@@ -3655,19 +3773,6 @@ export default function WorkflowDetailPage() {
                           value={scannerRepoFullName}
                           onChange={(e) => setScannerRepoFullName(e.target.value)}
                           placeholder="e.g. ritik125V/WakeUp"
-                          className="w-full px-3 py-2 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[10px] text-neutral-300 font-bold uppercase block">
-                          PAT Token (For Private Repos)
-                        </label>
-                        <input
-                          type="text"
-                          value={scannerToken}
-                          onChange={(e) => setScannerToken(e.target.value)}
-                          placeholder="ghp_xxx..."
                           className="w-full px-3 py-2 bg-black border-none rounded-lg text-white text-xs outline-none font-mono"
                         />
                       </div>
@@ -3691,7 +3796,7 @@ export default function WorkflowDetailPage() {
                   <div className="p-5 bg-neutral-900 rounded-xl space-y-4 border-none">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-white flex items-center gap-2">
-                        <SlidersHorizontal className="w-4 h-4 text-purple-400" /> Scan Scope & File Selection
+                        <SlidersHorizontal className="w-4 h-4 text-rose-300" /> Scan Scope & File Selection
                       </span>
                       <div className="flex items-center gap-2">
                         <button
@@ -3699,7 +3804,7 @@ export default function WorkflowDetailPage() {
                           onClick={() => setScannerScanMode('all')}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold border-none cursor-pointer transition-colors ${
                             scannerScanMode === 'all'
-                              ? 'bg-purple-600 text-white'
+                              ? 'bg-rose-600 text-white'
                               : 'bg-black text-neutral-400 hover:text-white'
                           }`}
                         >
@@ -3715,7 +3820,7 @@ export default function WorkflowDetailPage() {
                           }}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold border-none cursor-pointer transition-colors ${
                             scannerScanMode === 'select'
-                              ? 'bg-purple-600 text-white'
+                              ? 'bg-rose-600 text-white'
                               : 'bg-black text-neutral-400 hover:text-white'
                           }`}
                         >
@@ -3759,7 +3864,7 @@ export default function WorkflowDetailPage() {
                                 <button
                                   type="button"
                                   onClick={() => setSelectedFilePaths(repoFilesList.map((f) => f.path))}
-                                  className="text-purple-400 hover:underline border-none bg-transparent cursor-pointer font-bold"
+                                  className="text-rose-300 hover:underline border-none bg-transparent cursor-pointer font-bold"
                                 >
                                   Select All
                                 </button>
@@ -3791,7 +3896,7 @@ export default function WorkflowDetailPage() {
                           </div>
                         )}
                         <div className="text-xs text-neutral-400">
-                          Selected <span className="text-purple-400 font-bold">{selectedFilePaths.length}</span> file(s) for route extraction.
+                          Selected <span className="text-rose-300 font-bold">{selectedFilePaths.length}</span> file(s) for route extraction.
                         </div>
                       </div>
                     )}
@@ -3801,7 +3906,7 @@ export default function WorkflowDetailPage() {
                         type="button"
                         onClick={handleRunEndpointScanner}
                         disabled={isScanningEndpoints || !scannerRepoFullName.trim()}
-                        className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl border-none cursor-pointer flex items-center gap-2 shadow-lg disabled:opacity-50"
+                        className="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl border-none cursor-pointer flex items-center gap-2 shadow-lg disabled:opacity-50 transition-colors"
                       >
                         {isScanningEndpoints ? (
                           <>
@@ -3809,7 +3914,7 @@ export default function WorkflowDetailPage() {
                           </>
                         ) : (
                           <>
-                            <Sparkles className="w-4 h-4 text-purple-200" /> Run Endpoint Scanner Now
+                            <Sparkles className="w-4 h-4 text-white" /> Run Endpoint Scanner Now
                           </>
                         )}
                       </button>

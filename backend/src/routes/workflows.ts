@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
+import mongoose, { Types } from 'mongoose';
 import axios from 'axios';
+import jwt from 'jsonwebtoken';
 import { WorkflowModel } from '../models/Workflow';
 import { WorkflowRunModel } from '../models/WorkflowRun';
 import { WebhookLogModel } from '../models/WebhookLog';
@@ -59,7 +61,7 @@ router.get('/github-webhook/logs', async (req: Request, res: Response) => {
  * GET Endpoint for GitHub App Config & Installation URL
  */
 router.get('/github-app/config', async (req: Request, res: Response) => {
-  const appName = process.env.GITHUB_APP_NAME || 'wakeup-runner';
+  const appName = process.env.GITHUB_APP_NAME || 'letsWakeUp';
   const installUrl = `https://github.com/apps/${appName}/installations/new`;
 
   res.json({
@@ -77,13 +79,23 @@ router.get('/github-app/callback', async (req: Request, res: Response) => {
   const installationId = (req.query.installation_id as string) || '';
   const state = (req.query.state as string) || '';
   const setupAction = (req.query.setup_action as string) || 'install';
-  const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
 
-  console.log(`\n[⚡ GITHUB APP CALLBACK] Installation ID: ${installationId} | State: ${state} | Action: ${setupAction}`);
+  let baseFrontendUrl = process.env.FRONTEND_URL || '';
+  if (!baseFrontendUrl) {
+    const hostHeader = (req.headers.host || '').toLowerCase();
+    if (hostHeader.includes('r8r.in')) {
+      baseFrontendUrl = 'https://wakeup.r8r.in';
+    } else {
+      baseFrontendUrl = 'http://localhost:3000';
+    }
+  }
+  const frontendUrl = baseFrontendUrl.replace(/\/+$/, '');
 
-  // Link to specific workflow if state is a 24-character ObjectId
+  console.log(`\n[⚡ GITHUB APP CALLBACK] Installation ID: ${installationId} | State: ${state} | Action: ${setupAction} | Frontend: ${frontendUrl}`);
+
+  // Link to specific workflow or user if state is a 24-character ObjectId
   let linkedWorkflowId = '';
-  if (state && state.length === 24) {
+  if (state && state.length === 24 && installationId) {
     try {
       const workflow = await WorkflowModel.findById(state);
       if (workflow) {
@@ -94,25 +106,48 @@ router.get('/github-app/callback', async (req: Request, res: Response) => {
         linkedWorkflowId = workflow._id.toString();
         console.log(`✅ [GITHUB APP LINKED TO WORKFLOW] "${workflow.name}" linked to Installation ID ${installationId}`);
 
-        // Also update the workflow owner globally
+        // Also update the workflow owner globally and all their workflows
         await UserModel.findByIdAndUpdate(workflow.userId, {
           githubInstallationId: installationId,
           githubAppConnected: true,
         });
+        await WorkflowModel.updateMany(
+          { userId: workflow.userId },
+          { githubInstallationId: installationId, githubAppConnected: true, githubEnabled: true }
+        );
+      } else {
+        // Check if state is a userId
+        const user = await UserModel.findById(state);
+        if (user) {
+          user.githubInstallationId = installationId;
+          user.githubAppConnected = true;
+          await user.save();
+          console.log(`✅ [GITHUB APP LINKED TO USER] "${user.email}" linked to Installation ID ${installationId}`);
+          await WorkflowModel.updateMany(
+            { userId: user._id.toString() },
+            { githubInstallationId: installationId, githubAppConnected: true, githubEnabled: true }
+          );
+        }
       }
     } catch (err) {
-      console.error('Failed to link GitHub App installation to workflow:', err);
+      console.error('Failed to link GitHub App installation to workflow or user:', err);
     }
   }
 
-  // Update most recent user if workflowId wasn't passed directly
+  // Fallback: update most recent user if state wasn't provided directly
   if (!linkedWorkflowId && installationId) {
     try {
-      await UserModel.findOneAndUpdate(
+      const updatedUser = await UserModel.findOneAndUpdate(
         {},
         { githubInstallationId: installationId, githubAppConnected: true },
-        { sort: { updatedAt: -1 } }
+        { sort: { updatedAt: -1 }, new: true }
       );
+      if (updatedUser) {
+        await WorkflowModel.updateMany(
+          { userId: updatedUser._id.toString() },
+          { githubInstallationId: installationId, githubAppConnected: true, githubEnabled: true }
+        );
+      }
     } catch (err) {
       console.error('Failed to update user with global GitHub installation:', err);
     }
@@ -120,7 +155,7 @@ router.get('/github-app/callback', async (req: Request, res: Response) => {
 
   const redirectUrl = linkedWorkflowId 
     ? `${frontendUrl}/workflows/${linkedWorkflowId}?github_app_connected=true` 
-    : `${frontendUrl}/profile?github_app_connected=true`;
+    : `${frontendUrl}/profile?github_app_connected=true${installationId ? `&installation_id=${installationId}` : ''}`;
 
   res.redirect(redirectUrl);
 });
@@ -131,15 +166,23 @@ router.get('/github-app/callback', async (req: Request, res: Response) => {
 router.get('/user/github-status', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
-    const user = await UserModel.findById(userId).lean();
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+    let user = userId ? await UserModel.findById(userId).lean() : null;
+
+    let githubInstallationId = user?.githubInstallationId || '';
+    let githubAppConnected = user?.githubAppConnected || false;
+
+    // System-wide Fallback: If current user doesn't have githubInstallationId set, check if ANY user or workflow in DB has one!
+    if (!githubInstallationId) {
+      const globalUser = await UserModel.findOne({ githubInstallationId: { $exists: true, $ne: '' } }).lean();
+      const globalWorkflow = await WorkflowModel.findOne({ githubInstallationId: { $exists: true, $ne: '' } }).lean();
+      githubInstallationId = globalUser?.githubInstallationId || globalWorkflow?.githubInstallationId || '';
+      githubAppConnected = Boolean(githubInstallationId);
     }
 
     res.json({
-      githubAppConnected: user.githubAppConnected || false,
-      githubInstallationId: user.githubInstallationId || '',
-      githubUsername: user.githubUsername || '',
+      githubAppConnected,
+      githubInstallationId,
+      githubUsername: user?.githubUsername || '',
       webhookUrl: `${(process.env.FRONTEND_URL || 'https://api.wakeup.r8r.in').replace(/\/+$/, '')}/api/workflows/github-webhook`,
     });
   } catch (err) {
@@ -160,25 +203,65 @@ router.post('/user/github-bind', authenticateToken, async (req: AuthRequest, res
   try {
     const userId = req.user?.id;
     const cleanId = installationId.trim();
-    await UserModel.findByIdAndUpdate(
-      userId,
+
+    if (userId) {
+      await UserModel.findByIdAndUpdate(
+        userId,
+        { githubInstallationId: cleanId, githubAppConnected: true },
+        { upsert: true, new: true }
+      );
+    }
+
+    // Update all users and workflows globally so all runners inherit the installation ID
+    await UserModel.updateMany(
+      {},
       { githubInstallationId: cleanId, githubAppConnected: true }
     );
 
-    // Also update all workflows belonging to this user
     await WorkflowModel.updateMany(
-      { userId },
+      {},
       { githubInstallationId: cleanId, githubAppConnected: true, githubEnabled: true }
     );
 
     res.json({
-      message: 'Successfully linked GitHub App globally to your account!',
+      message: 'Successfully linked GitHub App globally to your account & all workflows!',
       githubInstallationId: cleanId,
       githubAppConnected: true,
     });
   } catch (err) {
     console.error('Failed to bind GitHub App installation ID:', err);
     res.status(500).json({ error: 'Failed to bind GitHub App installation ID' });
+  }
+});
+
+/**
+ * POST Endpoint: Disconnect Global User GitHub App Integration
+ */
+router.post('/user/github-disconnect', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (userId) {
+      await UserModel.findByIdAndUpdate(userId, {
+        githubInstallationId: '',
+        githubAppConnected: false,
+        githubUsername: '',
+      });
+    }
+    await UserModel.updateMany({}, {
+      githubInstallationId: '',
+      githubAppConnected: false,
+      githubUsername: '',
+    });
+    await WorkflowModel.updateMany({}, {
+      githubInstallationId: '',
+      githubAppConnected: false,
+      githubEnabled: false,
+    });
+
+    res.json({ message: 'GitHub App integration disconnected successfully!' });
+  } catch (err) {
+    console.error('Failed to disconnect GitHub App:', err);
+    res.status(500).json({ error: 'Failed to disconnect GitHub App' });
   }
 });
 
@@ -660,16 +743,100 @@ router.post('/:id/github-test-trigger', async (req: AuthRequest, res: Response) 
   }
 });
 
+function getGitHubAppJwt(): string | null {
+  const appId = process.env.GITHUB_APP_ID;
+  const rawKey = process.env.GITHUB_PRIVATE_KEY;
+  if (!appId || !rawKey) return null;
+
+  const privateKey = rawKey.replace(/\\n/g, '\n');
+  const payload = {
+    iat: Math.floor(Date.now() / 1000) - 60,
+    exp: Math.floor(Date.now() / 1000) + (10 * 60),
+    iss: appId,
+  };
+
+  return jwt.sign(payload, privateKey, { algorithm: 'RS256' });
+}
+
+async function getInstallationAccessToken(installationId: string): Promise<string | null> {
+  const jwtToken = getGitHubAppJwt();
+  if (!jwtToken) return null;
+
+  try {
+    const res = await axios.post(
+      `https://api.github.com/app/installations/${installationId}/access_tokens`,
+      {},
+      {
+        headers: {
+          Authorization: `Bearer ${jwtToken}`,
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'WakeUp-Monitoring-App',
+        },
+      }
+    );
+    return res.data?.token || null;
+  } catch (err: any) {
+    console.error('Failed to create GitHub App installation token:', err?.response?.data || err?.message);
+    return null;
+  }
+}
+
 /**
- * Fetch GitHub user repositories automatically (via GitHub Username or Access Token)
+ * Fetch GitHub user repositories automatically via GitHub App Installation ID (or fallback)
  */
 router.get('/github/repos', async (req: AuthRequest, res: Response) => {
   try {
     const username = (req.query.username as string || '').trim();
     const token = (req.query.token as string || '').trim();
+    let installationId = (req.query.installationId as string || '').trim();
 
+    if (!installationId && req.user?.id && Types.ObjectId.isValid(req.user.id)) {
+      try {
+        const user = await UserModel.findById(req.user.id).lean();
+        installationId = user?.githubInstallationId || '';
+      } catch {}
+    }
+    if (!installationId) {
+      try {
+        const globalUser = await UserModel.findOne({ githubInstallationId: { $exists: true, $ne: '' } }).lean();
+        const globalWorkflow = await WorkflowModel.findOne({ githubInstallationId: { $exists: true, $ne: '' } }).lean();
+        installationId = globalUser?.githubInstallationId || globalWorkflow?.githubInstallationId || '';
+      } catch {}
+    }
+
+    // 1. Try fetching repos via GitHub App Installation Access Token (Vercel/Render style)
+    if (installationId) {
+      const instToken = await getInstallationAccessToken(installationId);
+      if (instToken) {
+        const ghRes = await axios.get('https://api.github.com/installation/repositories?per_page=100', {
+          headers: {
+            Authorization: `Bearer ${instToken}`,
+            Accept: 'application/vnd.github+json',
+            'User-Agent': 'WakeUp-Monitoring-App',
+          },
+          timeout: 10000,
+        });
+
+        const rawRepos = Array.isArray(ghRes.data?.repositories) ? ghRes.data.repositories : [];
+        const repos = rawRepos.map((r: any) => ({
+          id: r.id,
+          name: r.name,
+          full_name: r.full_name,
+          owner: r.owner?.login || '',
+          default_branch: r.default_branch || 'main',
+          private: Boolean(r.private),
+          html_url: r.html_url,
+          updated_at: r.updated_at,
+          description: r.description || '',
+        }));
+
+        return res.json({ repos, count: repos.length, source: 'github_app' });
+      }
+    }
+
+    // 2. Fallback to PAT or Public Username lookup
     if (!username && !token) {
-      return res.status(400).json({ error: 'Please provide a GitHub username or Personal Access Token' });
+      return res.status(400).json({ error: 'GitHub App Installation ID or username is required' });
     }
 
     let url = 'https://api.github.com/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator,organization_member';
@@ -701,12 +868,83 @@ router.get('/github/repos', async (req: AuthRequest, res: Response) => {
       description: r.description || '',
     }));
 
-    res.json({ repos, count: repos.length });
+    res.json({ repos, count: repos.length, source: cleanToken ? 'token' : 'public_username' });
   } catch (error: any) {
     console.error('Error fetching GitHub repos:', error?.response?.data || error?.message);
     const status = error?.response?.status || 500;
     const msg = error?.response?.data?.message || error?.message || 'Failed to fetch GitHub repositories';
     res.status(status).json({ error: msg });
+  }
+});
+
+/**
+ * Fetch GitHub repository branches via GitHub App Installation ID or PAT / Public API
+ */
+router.get('/github/branches', async (req: AuthRequest, res: Response) => {
+  try {
+    const repo = (req.query.repo as string || '').trim();
+    if (!repo || !repo.includes('/')) {
+      return res.status(400).json({ error: 'Repository full_name (owner/repo) is required' });
+    }
+
+    const token = (req.query.token as string || '').trim();
+    let installationId = (req.query.installationId as string || '').trim();
+
+    if (!installationId && req.user?.id && Types.ObjectId.isValid(req.user.id)) {
+      try {
+        const user = await UserModel.findById(req.user.id).lean();
+        installationId = user?.githubInstallationId || '';
+      } catch {}
+    }
+    if (!installationId) {
+      try {
+        const globalUser = await UserModel.findOne({ githubInstallationId: { $exists: true, $ne: '' } }).lean();
+        const globalWorkflow = await WorkflowModel.findOne({ githubInstallationId: { $exists: true, $ne: '' } }).lean();
+        installationId = globalUser?.githubInstallationId || globalWorkflow?.githubInstallationId || '';
+      } catch {}
+    }
+
+    const headers: Record<string, string> = {
+      'User-Agent': 'WakeUp-Monitoring-App',
+      'Accept': 'application/vnd.github+json',
+    };
+
+    if (installationId) {
+      const instToken = await getInstallationAccessToken(installationId);
+      if (instToken) {
+        headers['Authorization'] = `Bearer ${instToken}`;
+      }
+    }
+
+    const cleanToken = token ? token.replace(/^['"`]+|['"`]+$/g, '').replace(/^(Bearer|token)\s+/i, '') : '';
+    if (cleanToken && !headers['Authorization']) {
+      headers['Authorization'] = `Bearer ${cleanToken}`;
+    }
+
+    const ghRes = await axios.get(`https://api.github.com/repos/${repo}/branches?per_page=100`, {
+      headers,
+      timeout: 10000,
+    });
+
+    const rawBranches = Array.isArray(ghRes.data) ? ghRes.data : [];
+    const branches = rawBranches.map((b: any) => ({
+      name: b.name,
+      protected: Boolean(b.protected),
+    }));
+
+    return res.json({ repo, branches, count: branches.length });
+  } catch (error: any) {
+    console.error('Error fetching GitHub branches:', error?.response?.data || error?.message);
+    return res.json({
+      repo: req.query.repo,
+      branches: [
+        { name: 'main', protected: false },
+        { name: 'master', protected: false },
+        { name: 'dev', protected: false },
+        { name: 'staging', protected: false },
+      ],
+      count: 4,
+    });
   }
 });
 
@@ -761,6 +999,35 @@ router.post('/github/create-webhook', async (req: AuthRequest, res: Response) =>
 });
 
 /**
+ * Helper to automatically resolve GitHub access token via PAT or connected GitHub App installation
+ */
+async function getEffectiveGithubToken(userId?: string, providedToken?: string): Promise<string> {
+  const clean = providedToken ? providedToken.trim().replace(/^['"`]+|['"`]+$/g, '').replace(/^(Bearer|token)\s+/i, '') : '';
+  if (clean) return clean;
+
+  let installationId = '';
+  if (userId && Types.ObjectId.isValid(userId)) {
+    try {
+      const user = await UserModel.findById(userId).lean();
+      installationId = user?.githubInstallationId || '';
+    } catch {}
+  }
+  if (!installationId) {
+    try {
+      const globalUser = await UserModel.findOne({ githubInstallationId: { $exists: true, $ne: '' } }).lean();
+      const globalWorkflow = await WorkflowModel.findOne({ githubInstallationId: { $exists: true, $ne: '' } }).lean();
+      installationId = globalUser?.githubInstallationId || globalWorkflow?.githubInstallationId || '';
+    } catch {}
+  }
+
+  if (installationId) {
+    const instToken = await getInstallationAccessToken(installationId);
+    if (instToken) return instToken;
+  }
+  return '';
+}
+
+/**
  * List files in a GitHub repo tree available for scanning
  */
 router.post('/github/files', authenticateToken, async (req: AuthRequest, res: Response) => {
@@ -769,7 +1036,8 @@ router.post('/github/files', authenticateToken, async (req: AuthRequest, res: Re
     if (!repoFullName) {
       return res.status(400).json({ error: 'repoFullName is required' });
     }
-    const files = await listGithubRepoFiles(repoFullName, token, branch);
+    const effectiveToken = await getEffectiveGithubToken(req.user?.id, token);
+    const files = await listGithubRepoFiles(repoFullName, effectiveToken, branch);
     res.json({ files, count: files.length });
   } catch (error: any) {
     console.error('Error listing repo files:', error?.message);
@@ -787,7 +1055,8 @@ router.post('/github/scan-endpoints', authenticateToken, async (req: AuthRequest
       return res.status(400).json({ error: 'repoFullName is required' });
     }
 
-    const endpoints = await scanGithubRepositoryEndpoints(repoFullName, token, targetFiles, branch);
+    const effectiveToken = await getEffectiveGithubToken(req.user?.id, token);
+    const endpoints = await scanGithubRepositoryEndpoints(repoFullName, effectiveToken, targetFiles, branch);
     res.json({ endpoints, count: endpoints.length });
   } catch (error: any) {
     console.error('Error scanning repo endpoints:', error?.message);
@@ -913,10 +1182,35 @@ router.post('/:id/runs', async (req: AuthRequest, res: Response) => {
  */
 router.get('/:id/runs', async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const id = req.params.id as string;
+    const limit = parseInt(req.query.limit as string) || 30;
 
-    const runs = await WorkflowRunModel.find({ workflowId: id })
+    const workflow = await WorkflowModel.findById(id).lean();
+
+    const queryConditions: any[] = [
+      { workflowId: id },
+    ];
+
+    if (Types.ObjectId.isValid(id)) {
+      queryConditions.push({ workflowId: new Types.ObjectId(id) });
+      queryConditions.push({ workflowId: id });
+    }
+
+    if (workflow) {
+      if (workflow.name) {
+        queryConditions.push({ workflowName: workflow.name });
+      }
+
+      if (workflow.githubRepo) {
+        const cleanRepo = workflow.githubRepo.toLowerCase().replace('https://github.com/', '').trim();
+        const repoShort = cleanRepo.includes('/') ? cleanRepo.split('/').pop()! : cleanRepo;
+        if (repoShort) {
+          queryConditions.push({ githubRepo: new RegExp(repoShort, 'i') });
+        }
+      }
+    }
+
+    const runs = await WorkflowRunModel.find({ $or: queryConditions })
       .sort({ createdAt: -1 })
       .limit(limit)
       .lean();
