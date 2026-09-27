@@ -73,7 +73,7 @@ export function RegisterModal({ isOpen, onClose, onSuccess }: RegisterModalProps
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.98 }}
-          className="w-full max-w-lg p-4 sm:p-6 bg-neutral-950 border-none rounded-2xl space-y-4 relative text-neutral-100 shadow-2xl"
+          className="w-full max-w-lg p-4 sm:p-6 bg-[#121214] border-none rounded-xl space-y-4 relative text-neutral-100 shadow-2xl"
         >
           <button
             onClick={onClose}
@@ -83,17 +83,17 @@ export function RegisterModal({ isOpen, onClose, onSuccess }: RegisterModalProps
           </button>
 
           <div className="flex items-center gap-3 border-none pb-1">
-            <div className="p-2.5 bg-neutral-900 text-rose-400 rounded-xl border-none">
-              <Globe className="w-5 h-5 text-rose-400" />
+            <div className="p-2.5 bg-[#1a1a1e] text-neutral-300 rounded-md border-none">
+              <Globe className="w-5 h-5 text-neutral-300" />
             </div>
             <div>
-              <h2 className="text-sm font-bold uppercase tracking-wider text-white">Register Backend Endpoint</h2>
+              <h2 className="text-sm font-bold uppercase tracking-wider text-[#f5f0e8]">Register Backend Endpoint</h2>
               <p className="text-xs text-neutral-400">Add URL for continuous automated monitoring</p>
             </div>
           </div>
 
           {error && (
-            <div className="p-3 text-xs bg-rose-950/60 text-rose-300 rounded-xl border-none font-medium">
+            <div className="p-3 text-xs bg-rose-950/60 text-rose-300 rounded-md border-none font-medium">
               {error}
             </div>
           )}
@@ -109,7 +109,7 @@ export function RegisterModal({ isOpen, onClose, onSuccess }: RegisterModalProps
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 required
-                className="w-full px-3.5 py-2.5 min-h-[44px] bg-neutral-900 border-none focus:ring-1 focus:ring-neutral-600 rounded-xl text-neutral-100 text-xs font-sans outline-none"
+                className="w-full px-3.5 py-2.5 min-h-[44px] bg-[#161619] border-none focus:ring-1 focus:ring-neutral-600 rounded-md text-neutral-100 text-xs font-sans outline-none"
               />
             </div>
 
@@ -117,8 +117,8 @@ export function RegisterModal({ isOpen, onClose, onSuccess }: RegisterModalProps
               <div className="flex items-center justify-between">
                 <label className="text-xs font-semibold text-neutral-300 uppercase tracking-wider">Project / Group Name</label>
                 {extractedName && !customName && (
-                  <span className="text-[10px] text-rose-400 font-semibold flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-rose-400" /> Auto: {extractedName}
+                  <span className="text-[10px] text-neutral-400 font-semibold flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-neutral-400" /> Auto: {extractedName}
                   </span>
                 )}
               </div>
@@ -127,7 +127,7 @@ export function RegisterModal({ isOpen, onClose, onSuccess }: RegisterModalProps
                 placeholder={extractedName ? `Default: ${extractedName}` : 'e.g. PAYMENT_SERVICE'}
                 value={customName}
                 onChange={(e) => setCustomName(e.target.value)}
-                className="w-full px-3.5 py-2.5 min-h-[44px] bg-neutral-900 border-none focus:ring-1 focus:ring-neutral-600 rounded-xl text-neutral-100 text-xs font-sans outline-none uppercase"
+                className="w-full px-3.5 py-2.5 min-h-[44px] bg-[#161619] border-none focus:ring-1 focus:ring-neutral-600 rounded-md text-neutral-100 text-xs font-sans outline-none uppercase"
               />
             </div>
 
@@ -141,13 +141,13 @@ export function RegisterModal({ isOpen, onClose, onSuccess }: RegisterModalProps
                     type="button"
                     key={interval}
                     onClick={() => setCheckInterval(interval)}
-                    className={`py-2.5 px-3 min-h-[44px] text-xs font-semibold uppercase transition-all flex items-center justify-center gap-1 rounded-xl border-none cursor-pointer touch-press ${
+                    className={`py-2.5 px-3 min-h-[44px] text-xs font-semibold uppercase transition-all flex items-center justify-center gap-1 rounded-md border-none cursor-pointer touch-press ${
                       checkInterval === interval
-                        ? 'bg-neutral-800 text-white font-bold'
-                        : 'bg-neutral-900 text-neutral-400 hover:text-white'
+                        ? 'bg-[#f5f0e8] text-black font-bold'
+                        : 'bg-[#161619] text-neutral-400 hover:text-white'
                     }`}
                   >
-                    {checkInterval === interval && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                    {checkInterval === interval && <Check className="w-3.5 h-3.5 text-black" />}
                     Every {interval}M
                   </button>
                 ))}
@@ -158,13 +158,13 @@ export function RegisterModal({ isOpen, onClose, onSuccess }: RegisterModalProps
               <button
                 type="submit"
                 disabled={loading || !url}
-                className="w-full py-3 min-h-[44px] bg-neutral-800 hover:bg-neutral-700 active:bg-neutral-800 text-white text-xs font-semibold uppercase transition-all flex items-center justify-center gap-2 rounded-xl border-none disabled:opacity-50 cursor-pointer shadow-md touch-press"
+                className="w-full py-3 min-h-[44px] bg-[#f5f0e8] hover:bg-[#e8e2d8] text-black text-xs font-bold uppercase transition-all flex items-center justify-center gap-2 rounded-md border-none disabled:opacity-50 cursor-pointer shadow-sm touch-press"
               >
                 {loading ? (
                   <span className="text-xs">Scheduling Batch...</span>
                 ) : (
                   <>
-                    <Plus className="w-4 h-4 text-white" /> Start Monitoring
+                    <Plus className="w-4 h-4 text-black" /> Start Monitoring
                   </>
                 )}
               </button>

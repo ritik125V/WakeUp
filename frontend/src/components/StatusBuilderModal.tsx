@@ -235,13 +235,13 @@ export function StatusBuilderModal({
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.98 }}
-          className="w-full max-w-6xl max-h-[92vh] flex flex-col bg-neutral-950 border border-neutral-800 rounded-xl relative text-neutral-100 shadow-2xl overflow-hidden"
+          className="w-full max-w-6xl max-h-[92vh] flex flex-col bg-[#121214] border-none rounded-xl relative text-neutral-100 shadow-2xl overflow-hidden"
         >
           {/* Modal Top Header */}
-          <div className="p-4 border-b border-neutral-900 flex items-center justify-between gap-4 bg-black">
+          <div className="p-4 border-none flex items-center justify-between gap-4 bg-[#1a1a1e]">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-rose-950/60 text-rose-300 rounded-lg">
-                <SlidersHorizontal className="w-5 h-5 text-rose-300" />
+              <div className="p-2 bg-[#242429] text-neutral-200 rounded-md">
+                <SlidersHorizontal className="w-5 h-5 text-neutral-200" />
               </div>
               <div>
                 <h2 className="text-sm font-bold uppercase tracking-wider text-white">
@@ -255,7 +255,7 @@ export function StatusBuilderModal({
 
             <button
               onClick={onClose}
-              className="p-1.5 text-neutral-400 hover:text-white rounded-md bg-neutral-900"
+              className="p-1.5 text-neutral-400 hover:text-white rounded-md bg-[#161619] border-none cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -264,14 +264,14 @@ export function StatusBuilderModal({
           {/* 2-Column Main Split View: Left Controls, Right ALWAYS VISIBLE Live Preview */}
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
             {/* Left Controls Column */}
-            <div className="w-full lg:w-1/2 flex flex-col border-r border-neutral-900 overflow-hidden">
+            <div className="w-full lg:w-1/2 flex flex-col border-none overflow-hidden">
               {/* Controls Tabs */}
-              <div className="flex items-center gap-1 p-2 bg-neutral-900 border-b border-neutral-850 overflow-x-auto text-xs shrink-0">
+              <div className="flex items-center gap-1 p-2 bg-[#121214] border-none overflow-x-auto text-xs shrink-0">
                 <button
                   type="button"
                   onClick={() => setActiveTab('services')}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-bold transition-all border-none ${
-                    activeTab === 'services' ? 'bg-rose-950 text-rose-300' : 'text-neutral-400 hover:text-white'
+                    activeTab === 'services' ? 'bg-[#f5f0e8] text-black' : 'text-neutral-400 hover:text-white'
                   }`}
                 >
                   <Layout className="w-3.5 h-3.5" /> Services & Details
@@ -281,7 +281,7 @@ export function StatusBuilderModal({
                   type="button"
                   onClick={() => setActiveTab('theme')}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-bold transition-all border-none ${
-                    activeTab === 'theme' ? 'bg-rose-950 text-rose-300' : 'text-neutral-400 hover:text-white'
+                    activeTab === 'theme' ? 'bg-[#f5f0e8] text-black' : 'text-neutral-400 hover:text-white'
                   }`}
                 >
                   <Palette className="w-3.5 h-3.5" /> Theme & Colors
@@ -291,7 +291,7 @@ export function StatusBuilderModal({
                   type="button"
                   onClick={() => setActiveTab('typography')}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-bold transition-all border-none ${
-                    activeTab === 'typography' ? 'bg-rose-950 text-rose-300' : 'text-neutral-400 hover:text-white'
+                    activeTab === 'typography' ? 'bg-[#f5f0e8] text-black' : 'text-neutral-400 hover:text-white'
                   }`}
                 >
                   <Type className="w-3.5 h-3.5" /> Text & Badges
@@ -301,7 +301,7 @@ export function StatusBuilderModal({
                   type="button"
                   onClick={() => setActiveTab('toggles')}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-bold transition-all border-none ${
-                    activeTab === 'toggles' ? 'bg-rose-950 text-rose-300' : 'text-neutral-400 hover:text-white'
+                    activeTab === 'toggles' ? 'bg-[#f5f0e8] text-black' : 'text-neutral-400 hover:text-white'
                   }`}
                 >
                   <SlidersHorizontal className="w-3.5 h-3.5" /> Toggles
@@ -602,11 +602,11 @@ export function StatusBuilderModal({
                     )}
 
                     {/* Submit Action Bar */}
-                    <div className="pt-3 border-t border-neutral-900 flex items-center justify-end gap-3">
+                    <div className="pt-3 border-none flex items-center justify-end gap-3">
                       <button
                         type="button"
                         onClick={onClose}
-                        className="px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 text-xs font-bold rounded-lg border-none cursor-pointer"
+                        className="px-4 py-2 bg-[#161619] hover:bg-[#242429] text-neutral-300 text-xs font-bold rounded-md border-none cursor-pointer"
                       >
                         Cancel
                       </button>
@@ -614,13 +614,13 @@ export function StatusBuilderModal({
                       <button
                         type="submit"
                         disabled={loading || selectedEndpointIds.length === 0}
-                        className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold uppercase rounded-lg border-none transition-all flex items-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
+                        className="px-5 py-2 bg-[#f5f0e8] hover:bg-[#e6e1d9] text-black text-xs font-bold uppercase rounded-md border-none transition-all flex items-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
                       >
                         {loading ? (
                           'SAVING...'
                         ) : (
                           <>
-                            <Sparkles className="w-4 h-4" />
+                            <Sparkles className="w-4 h-4 text-black" />
                             {editingPage ? 'UPDATE STATUS PAGE' : 'PUBLISH STATUS PAGE'}
                           </>
                         )}
@@ -632,13 +632,13 @@ export function StatusBuilderModal({
             </div>
 
             {/* Right Column: ALWAYS VISIBLE LIVE PREVIEW STUDIO */}
-            <div className="w-full lg:w-1/2 flex flex-col bg-black/60 overflow-hidden">
-              <div className="p-3 bg-neutral-900 border-b border-neutral-850 flex items-center justify-between">
+            <div className="w-full lg:w-1/2 flex flex-col bg-[#000000] overflow-hidden">
+              <div className="p-3 bg-[#1a1a1e] border-none flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs font-bold text-white uppercase">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                   <span>LIVE PREVIEW STUDIO (REAL-TIME)</span>
                 </div>
-                <span className="text-[10px] text-rose-300 bg-rose-950/60 border border-rose-500/30 px-2 py-0.5 rounded font-mono">
+                <span className="text-[10px] text-neutral-300 bg-[#161619] border-none px-2 py-0.5 rounded-md font-mono">
                   {fontSize.toUpperCase()}
                 </span>
               </div>
@@ -646,14 +646,14 @@ export function StatusBuilderModal({
               <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex items-start justify-center">
                 <div
                   style={{ backgroundColor, color: '#ffffff' }}
-                  className="w-full p-5 rounded-2xl border border-white/10 space-y-5 shadow-2xl transition-all duration-300 font-mono min-h-[350px]"
+                  className="w-full p-5 rounded-lg border-none space-y-5 shadow-2xl transition-all duration-300 font-mono min-h-[350px]"
                 >
                   {/* Preview Header */}
                   <div className="text-center space-y-2">
                     {customHeaderBadge && (
                       <div
-                        style={{ color: accentColor, backgroundColor: `${accentColor}20`, borderColor: `${accentColor}40` }}
-                        className="inline-flex items-center gap-1.5 px-3 py-0.5 text-[10px] font-bold rounded-full border uppercase shadow-sm"
+                        style={{ color: accentColor, backgroundColor: `${accentColor}20` }}
+                        className="inline-flex items-center gap-1.5 px-3 py-0.5 text-[10px] font-bold rounded-full border-none uppercase shadow-sm"
                       >
                         <Activity className="w-3 h-3" /> {customHeaderBadge}
                       </div>
@@ -661,12 +661,12 @@ export function StatusBuilderModal({
                     <h2
                       className={
                         fontSize === 'genz_display'
-                          ? 'text-2xl font-extrabold uppercase text-transparent bg-clip-text bg-gradient-to-r from-white via-rose-300 to-rose-500 tracking-wider'
+                          ? 'text-2xl font-extrabold uppercase text-white tracking-wider'
                           : fontSize === 'large'
-                          ? 'text-xl font-bold uppercase'
+                          ? 'text-xl font-bold uppercase text-white'
                           : fontSize === 'compact'
-                          ? 'text-sm font-bold uppercase'
-                          : 'text-lg font-bold uppercase'
+                          ? 'text-sm font-bold uppercase text-white'
+                          : 'text-lg font-bold uppercase text-white'
                       }
                     >
                       {title || 'Acme System Status'}

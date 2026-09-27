@@ -92,4 +92,7 @@ const workflowSchema = new Schema<IWorkflow>(
   }
 );
 
+// Compound index for O(log N) user-scoped workflow title lookups
+workflowSchema.index({ userId: 1, name: 1 });
+
 export const WorkflowModel = model<IWorkflow>('Workflow', workflowSchema);

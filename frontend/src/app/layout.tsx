@@ -23,6 +23,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'WakeUp | System Monitoring',
   description: 'Minimalist high-speed server health and system monitoring',
+  icons: {
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/icon.svg',
+  },
 };
 
 export default function RootLayout({
@@ -35,7 +40,7 @@ export default function RootLayout({
       lang="en"
       className={`${jakartaSans.variable} ${geistSans.variable} ${geistMono.variable} h-full antialiased font-sans`}
     >
-      <body className="min-h-full flex flex-col bg-black text-neutral-100 selection:bg-rose-600 selection:text-white font-sans antialiased">
+      <body className="min-h-full flex flex-col bg-black text-neutral-100 selection:bg-[#f5f0e8] selection:text-black font-sans antialiased">
         <Providers>
           <Navbar />
           <main className="flex-1 w-full">{children}</main>

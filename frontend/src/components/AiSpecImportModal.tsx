@@ -212,12 +212,12 @@ Format your generated response exactly as follows:
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm select-none font-mono">
-      <div className="w-full max-w-3xl bg-neutral-950 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] border-none text-xs">
+      <div className="w-full max-w-3xl bg-[#121214] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] border-none text-xs">
         {/* Modal Header */}
-        <div className="p-4 bg-neutral-900/90 flex items-center justify-between border-none">
+        <div className="p-4 bg-[#1a1a1e] flex items-center justify-between border-none">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-rose-950 text-rose-300 rounded-lg">
-              <Bot className="w-5 h-5" />
+            <div className="p-2 bg-[#242429] text-neutral-200 rounded-md">
+              <Bot className="w-5 h-5 text-neutral-200" />
             </div>
             <div>
               <h2 className="text-sm font-bold text-white tracking-wide">Import Workflow via Local AI Agent</h2>
@@ -228,18 +228,18 @@ Format your generated response exactly as follows:
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 text-neutral-400 hover:text-white hover:bg-[#242429] rounded-md transition-colors cursor-pointer border-none"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Sub-Navigation Tabs */}
-        <div className="flex items-center gap-2 px-4 pt-3 bg-neutral-950 border-b border-neutral-900">
+        <div className="flex items-center gap-2 px-4 pt-3 bg-[#121214] border-none">
           <button
             onClick={() => setActiveTab('prompt')}
-            className={`px-3.5 py-2 rounded-t-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-              activeTab === 'prompt' ? 'bg-rose-950 text-rose-300' : 'text-neutral-400 hover:text-white'
+            className={`px-3.5 py-2 rounded-md font-bold flex items-center gap-1.5 transition-all cursor-pointer border-none ${
+              activeTab === 'prompt' ? 'bg-[#f5f0e8] text-black' : 'text-neutral-400 hover:text-white'
             }`}
           >
             <Copy className="w-3.5 h-3.5" /> 1. Copy AI Agent Prompt
@@ -247,8 +247,8 @@ Format your generated response exactly as follows:
 
           <button
             onClick={() => setActiveTab('import')}
-            className={`px-3.5 py-2 rounded-t-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-              activeTab === 'import' ? 'bg-rose-950 text-rose-300' : 'text-neutral-400 hover:text-white'
+            className={`px-3.5 py-2 rounded-md font-bold flex items-center gap-1.5 transition-all cursor-pointer border-none ${
+              activeTab === 'import' ? 'bg-[#f5f0e8] text-black' : 'text-neutral-400 hover:text-white'
             }`}
           >
             <Upload className="w-3.5 h-3.5" /> 2. Paste / Upload Markdown
@@ -257,11 +257,11 @@ Format your generated response exactly as follows:
           {parsedResult && parsedResult.suggestions.length > 0 && (
             <button
               onClick={() => setActiveTab('suggestions')}
-              className={`px-3.5 py-2 rounded-t-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                activeTab === 'suggestions' ? 'bg-amber-950 text-amber-300' : 'text-neutral-400 hover:text-white'
+              className={`px-3.5 py-2 rounded-md font-bold flex items-center gap-1.5 transition-all cursor-pointer border-none ${
+                activeTab === 'suggestions' ? 'bg-amber-400 text-black' : 'text-neutral-400 hover:text-white'
               }`}
             >
-              <Lightbulb className="w-3.5 h-3.5 text-amber-400" /> AI Insights ({parsedResult.suggestions.length})
+              <Lightbulb className="w-3.5 h-3.5" /> AI Insights ({parsedResult.suggestions.length})
             </button>
           )}
         </div>
@@ -269,18 +269,18 @@ Format your generated response exactly as follows:
         {/* Tab 1: AI Prompt Generator */}
         {activeTab === 'prompt' && (
           <div className="p-5 space-y-4 overflow-y-auto">
-            <div className="p-3 bg-neutral-900/60 rounded-xl space-y-1 text-neutral-300 leading-relaxed text-[11px]">
+            <div className="p-3 bg-[#1a1a1e] rounded-lg space-y-1 text-neutral-300 leading-relaxed text-[11px] border-none">
               <span className="font-bold text-white flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-rose-400" /> How it works:
+                <Sparkles className="w-4 h-4 text-[#f5f0e8]" /> How it works:
               </span>
               <p>
                 1. Copy the prompt below into your local AI coding assistant (Antigravity, Cursor, Windsurf, Claude Code, or Copilot).
               </p>
               <p>
-                2. Your AI agent will scan your codebase, consult you on skip preferences, and generate a full lifecycle <code className="text-emerald-400 bg-neutral-950 px-1 py-0.5 rounded">wakeup_spec.md</code> with cleanup steps.
+                2. Your AI agent will scan your codebase, consult you on skip preferences, and generate a full lifecycle <code className="text-emerald-400 bg-[#161619] px-1 py-0.5 rounded">wakeup_spec.md</code> with cleanup steps.
               </p>
               <p>
-                3. Paste or upload <code className="text-emerald-400 bg-neutral-950 px-1 py-0.5 rounded">wakeup_spec.md</code> in Tab 2 to instantly generate all workflow steps!
+                3. Paste or upload <code className="text-emerald-400 bg-[#161619] px-1 py-0.5 rounded">wakeup_spec.md</code> in Tab 2 to instantly generate all workflow steps!
               </p>
             </div>
 
@@ -289,14 +289,14 @@ Format your generated response exactly as follows:
                 <span className="font-bold text-white">Universal AI Codebase Scanner Prompt:</span>
                 <button
                   onClick={handleCopyPrompt}
-                  className="px-3 py-1.5 bg-rose-700 hover:bg-rose-600 text-white rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
+                  className="px-3 py-1.5 bg-[#f5f0e8] hover:bg-[#e6e1d9] text-black rounded-md font-bold flex items-center gap-1.5 transition-all cursor-pointer border-none shadow-md"
                 >
-                  {copiedPrompt ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedPrompt ? <Check className="w-3.5 h-3.5 text-black" /> : <Copy className="w-3.5 h-3.5 text-black" />}
                   <span>{copiedPrompt ? 'Copied Prompt!' : 'Copy AI Prompt'}</span>
                 </button>
               </div>
 
-              <pre className="p-4 bg-neutral-900 text-emerald-400 rounded-xl overflow-x-auto max-h-64 text-[11px] leading-relaxed select-text">
+              <pre className="p-4 bg-[#161619] text-emerald-400 rounded-lg overflow-x-auto max-h-64 text-[11px] leading-relaxed select-text border-none">
                 {aiAgentPromptText}
               </pre>
             </div>
@@ -304,10 +304,10 @@ Format your generated response exactly as follows:
             <div className="flex justify-end pt-2">
               <button
                 onClick={() => setActiveTab('import')}
-                className="px-4 py-2 bg-neutral-900 hover:bg-neutral-850 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer"
+                className="px-4 py-2 bg-[#1a1a1e] hover:bg-[#242429] text-white rounded-md font-bold flex items-center gap-1.5 cursor-pointer border-none"
               >
                 <span>Next: Paste / Upload Spec</span>
-                <ArrowRight className="w-4 h-4 text-rose-400" />
+                <ArrowRight className="w-4 h-4 text-neutral-300" />
               </button>
             </div>
           </div>
@@ -319,7 +319,7 @@ Format your generated response exactly as follows:
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <span className="font-bold text-white">Paste or Upload wakeup_spec.md Specification:</span>
 
-              <label className="px-3 py-1.5 bg-neutral-900 hover:bg-neutral-850 text-rose-300 font-bold rounded-lg cursor-pointer flex items-center gap-1.5 transition-all">
+              <label className="px-3 py-1.5 bg-[#1a1a1e] hover:bg-[#242429] text-neutral-200 font-bold rounded-md cursor-pointer flex items-center gap-1.5 transition-all border-none">
                 <Upload className="w-3.5 h-3.5" /> Upload File (.md)
                 <input type="file" accept=".md,.markdown,.txt" onChange={handleFileUpload} className="hidden" />
               </label>
@@ -330,17 +330,17 @@ Format your generated response exactly as follows:
               value={specContent}
               onChange={(e) => handleSpecContentChange(e.target.value)}
               placeholder="Paste contents of wakeup_spec.md generated by your local AI agent here..."
-              className="w-full bg-neutral-900 text-xs font-mono text-emerald-400 p-3.5 rounded-xl border-none focus:outline-none leading-relaxed min-h-[220px]"
+              className="w-full bg-[#161619] text-xs font-mono text-emerald-400 p-3.5 rounded-md border-none focus:outline-none leading-relaxed min-h-[220px]"
             />
 
             {parseError && (
-              <div className="p-3 bg-rose-950/60 text-rose-300 rounded-xl font-bold text-[11px]">
+              <div className="p-3 bg-rose-950/60 text-rose-300 rounded-md font-bold text-[11px]">
                 ❌ {parseError}
               </div>
             )}
 
             {parsedResult && (
-              <div className="p-4 bg-emerald-950/40 rounded-xl space-y-2 border-none">
+              <div className="p-4 bg-emerald-950/40 rounded-md space-y-2 border-none">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-emerald-400 flex items-center gap-1.5 text-xs">
                     <Check className="w-4 h-4" /> Successfully Parsed AI Specification!
@@ -366,14 +366,14 @@ Format your generated response exactly as follows:
         {/* Tab 3: AI Suggestions & System Upgrades */}
         {activeTab === 'suggestions' && parsedResult && (
           <div className="p-5 space-y-4 overflow-y-auto">
-            <div className="p-3 bg-amber-950/40 text-amber-300 rounded-xl font-bold text-xs flex items-center gap-2">
+            <div className="p-3 bg-amber-950/40 text-amber-300 rounded-md font-bold text-xs flex items-center gap-2 border-none">
               <Lightbulb className="w-4 h-4 text-amber-400 flex-shrink-0" />
               <span>AI Agent Codebase Analysis & System Upgrade Suggestions:</span>
             </div>
 
             <div className="space-y-2.5">
               {parsedResult.suggestions.map((sug, idx) => (
-                <div key={idx} className="p-3.5 bg-neutral-900 rounded-xl flex items-start gap-3 text-xs leading-relaxed text-neutral-200">
+                <div key={idx} className="p-3.5 bg-[#161619] rounded-md flex items-start gap-3 text-xs leading-relaxed text-neutral-200 border-none">
                   <span className="w-5 h-5 rounded-full bg-amber-950 text-amber-300 flex items-center justify-center font-bold text-[10px] flex-shrink-0">
                     {idx + 1}
                   </span>
@@ -385,10 +385,10 @@ Format your generated response exactly as follows:
         )}
 
         {/* Modal Footer Controls */}
-        <div className="p-4 bg-neutral-900/90 flex items-center justify-between border-none">
+        <div className="p-4 bg-[#1a1a1e] flex items-center justify-between border-none">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-neutral-900 hover:bg-neutral-850 text-neutral-300 font-bold rounded-xl cursor-pointer"
+            className="px-4 py-2 bg-[#161619] hover:bg-[#242429] text-neutral-300 font-bold rounded-md cursor-pointer border-none"
           >
             Cancel
           </button>
@@ -396,9 +396,9 @@ Format your generated response exactly as follows:
           <button
             onClick={handleApplyImport}
             disabled={!parsedResult || parsedResult.steps.length === 0}
-            className="px-5 py-2.5 bg-rose-700 hover:bg-rose-600 disabled:opacity-50 text-white font-bold rounded-xl flex items-center gap-2 cursor-pointer shadow-lg shadow-rose-700/20"
+            className="px-5 py-2.5 bg-[#f5f0e8] hover:bg-[#e6e1d9] disabled:opacity-50 text-black font-bold rounded-md flex items-center gap-2 cursor-pointer shadow-md border-none"
           >
-            <Zap className="w-4 h-4 fill-current" />
+            <Zap className="w-4 h-4 text-black fill-current" />
             <span>Import & Build Workflow ({parsedResult?.steps.length || 0} Steps)</span>
           </button>
         </div>

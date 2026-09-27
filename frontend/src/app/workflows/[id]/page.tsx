@@ -58,6 +58,8 @@ import {
   Laptop,
   History,
   GitCommit,
+  Cloud,
+  CloudOff,
 } from 'lucide-react';
 import { extractEndpointsFromCode } from '@/lib/codeParser';
 import {
@@ -93,6 +95,7 @@ import {
   IStepTelemetryForPDF,
   IWorkflowRunSummaryForPDF,
 } from '@/lib/pdfReportGenerator';
+import { saveLocalWorkflow } from '@/lib/workflowLocalStorage';
 
 const API_SOCKET_URL = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5000';
 
@@ -313,6 +316,9 @@ export default function WorkflowDetailPage() {
   const [workflow, setWorkflow] = useState<WorkflowData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
+  const [syncState, setSyncState] = useState<'idle' | 'editing' | 'autosaving' | 'saved' | 'error'>('idle');
+  const autoSyncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isFirstMountRef = useRef<boolean>(true);
   const [activeStepIndex, setActiveStepIndex] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<'params' | 'headers' | 'body' | 'cookies' | 'variables'>('body');
 
@@ -331,6 +337,94 @@ export default function WorkflowDetailPage() {
   const [isSingleTesting, setIsSingleTesting] = useState<boolean>(false);
   const [singleTestResult, setSingleTestResult] = useState<IStepTelemetryForPDF | null>(null);
 
+  // Interactive Live Session Cookie Jar & Variables Map for "Test Step Now"
+  const [liveCookieJar, setLiveCookieJar] = useState<Record<string, string>>({});
+  const [liveVariablesMap, setLiveVariablesMap] = useState<Record<string, string>>({});
+
+  // Postman Split-Pane Draggable Resizer State
+  const [responsePanelHeight, setResponsePanelHeight] = useState<number>(280);
+  const [isDraggingResizer, setIsDraggingResizer] = useState<boolean>(false);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const dragStartYRef = useRef<number>(0);
+  const startHeightRef = useRef<number>(280);
+  const rafIdRef = useRef<number | null>(null);
+
+  const handleMouseDownResizer = (e: React.MouseEvent) => {
+    e.preventDefault();
+    dragStartYRef.current = e.clientY;
+    startHeightRef.current = responsePanelHeight;
+    setIsDraggingResizer(true);
+  };
+
+  const handleTouchStartResizer = (e: React.TouchEvent) => {
+    if (e.touches.length > 0) {
+      dragStartYRef.current = e.touches[0].clientY;
+      startHeightRef.current = responsePanelHeight;
+      setIsDraggingResizer(true);
+    }
+  };
+
+  useEffect(() => {
+    const handleMove = (clientY: number) => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+      }
+      rafIdRef.current = requestAnimationFrame(() => {
+        const deltaY = clientY - dragStartYRef.current;
+        const newHeight = startHeightRef.current - deltaY;
+        const minH = 100;
+        const totalContainerH = workspaceRef.current ? workspaceRef.current.clientHeight : 700;
+        const maxH = Math.max(150, totalContainerH - 180);
+        const clampedHeight = Math.max(minH, Math.min(maxH, newHeight));
+        setResponsePanelHeight(clampedHeight);
+      });
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isDraggingResizer) {
+        handleMove(e.clientY);
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (isDraggingResizer && e.touches.length > 0) {
+        handleMove(e.touches[0].clientY);
+      }
+    };
+
+    const handleStopDrag = () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      setIsDraggingResizer(false);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+
+    if (isDraggingResizer) {
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'row-resize';
+      window.addEventListener('mousemove', handleMouseMove, { passive: true });
+      window.addEventListener('mouseup', handleStopDrag);
+      window.addEventListener('touchmove', handleTouchMove, { passive: true });
+      window.addEventListener('touchend', handleStopDrag);
+    }
+
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleStopDrag);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleStopDrag);
+    };
+  }, [isDraggingResizer]);
+
   // GitHub Webhook Auto-Trigger & Control Center State
   const [isGithubModalOpen, setIsGithubModalOpen] = useState<boolean>(false);
   const [githubModalTab, setGithubModalTab] = useState<'config' | 'simulation' | 'scanner' | 'history'>('config');
@@ -342,6 +436,78 @@ export default function WorkflowDetailPage() {
   const [isSimulatingPush, setIsSimulatingPush] = useState<boolean>(false);
   const [pushSimResult, setPushSimResult] = useState<string | null>(null);
   const [copiedWebhookUrl, setCopiedWebhookUrl] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (isFirstMountRef.current) {
+      isFirstMountRef.current = false;
+      return;
+    }
+    if (!workflow) return;
+
+    if (autoSyncTimeoutRef.current) {
+      clearTimeout(autoSyncTimeoutRef.current);
+    }
+
+    // Wait 10 seconds of inactivity after user finishes editing
+    autoSyncTimeoutRef.current = setTimeout(async () => {
+      try {
+        // Display "Auto-saving" only while active DB and localStorage sync call is executing
+        setSyncState('autosaving');
+        await updateWorkflow(workflow._id, {
+          name: workflow.name,
+          description: workflow.description,
+          steps: workflow.steps,
+          githubEnabled,
+          githubRepo,
+          githubBranch,
+          notificationEmail,
+        });
+        setSyncState('saved');
+        setTimeout(() => {
+          setSyncState('idle');
+        }, 2500);
+      } catch (err) {
+        console.error('Auto-sync error:', err);
+        setSyncState('error');
+      }
+    }, 10000);
+
+    return () => {
+      if (autoSyncTimeoutRef.current) {
+        clearTimeout(autoSyncTimeoutRef.current);
+      }
+    };
+  }, [workflow?.name, workflow?.description, workflow?.steps, githubEnabled, githubRepo, githubBranch, notificationEmail]);
+
+  const handleSaveWorkflow = async () => {
+    if (!workflow) return;
+    if (autoSyncTimeoutRef.current) {
+      clearTimeout(autoSyncTimeoutRef.current);
+    }
+    try {
+      setSaving(true);
+      setSyncState('autosaving');
+      const res = await updateWorkflow(workflow._id, {
+        name: workflow.name,
+        description: workflow.description,
+        steps: workflow.steps,
+        githubEnabled,
+        githubRepo,
+        githubBranch,
+        notificationEmail,
+      });
+      setWorkflow(res.workflow);
+      setSyncState('saved');
+      setTimeout(() => {
+        setSyncState('idle');
+      }, 2500);
+    } catch (err) {
+      console.error('Failed to save workflow:', err);
+      setSyncState('error');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // GitHub Repo Fetcher & Auto-Webhook State
   const [githubUserOrToken, setGithubUserOrToken] = useState<string>('');
@@ -905,26 +1071,7 @@ export default function WorkflowDetailPage() {
     };
   }, [workflowId, workflow?.name]);
 
-  const handleSaveWorkflow = async () => {
-    if (!workflow) return;
-    try {
-      setSaving(true);
-      const res = await updateWorkflow(workflow._id, {
-        name: workflow.name,
-        description: workflow.description,
-        steps: workflow.steps,
-        githubEnabled,
-        githubRepo,
-        githubBranch,
-        notificationEmail,
-      });
-      setWorkflow(res.workflow);
-    } catch (err) {
-      console.error('Failed to save workflow:', err);
-    } finally {
-      setSaving(false);
-    }
-  };
+
 
   const [githubInstallationIdInput, setGithubInstallationIdInput] = useState<string>('');
 
@@ -975,20 +1122,49 @@ export default function WorkflowDetailPage() {
   };
 
   const handleStartWorkflowRun = async () => {
+    if (workflow) {
+      saveLocalWorkflow(workflow);
+    }
     await handleSaveWorkflow();
     setIsPreflightOpen(false);
     router.push(`/workflows/${workflowId}/report`);
   };
 
-  // Test Single Step Independently
+  // Format / Prettify JSON Body Payload
+  const handlePrettifyJson = () => {
+    if (!workflow || !workflow.steps[activeStepIndex]) return;
+    const currentStep = workflow.steps[activeStepIndex];
+    let raw = currentStep.bodyPayload || '';
+    if (!raw.trim()) return;
+    try {
+      if (raw.includes('\\n')) {
+        raw = raw.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+      }
+      const parsed = JSON.parse(raw);
+      updateCurrentStep({ bodyPayload: JSON.stringify(parsed, null, 2) });
+    } catch (e) {
+      const unescaped = raw.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+      updateCurrentStep({ bodyPayload: unescaped });
+    }
+  };
+
+  // Test Single Step Independently (Carrying Cookies & Variables across tests)
   const handleTestSingleStep = async () => {
     if (!workflow || !workflow.steps[activeStepIndex]) return;
     try {
       setIsSingleTesting(true);
       setSingleTestResult(null);
       const targetStep = workflow.steps[activeStepIndex];
-      const result = await testSingleWorkflowStep(targetStep);
+      const result = await testSingleWorkflowStep(targetStep, liveVariablesMap, liveCookieJar);
       setSingleTestResult(result);
+
+      // Persist captured cookies & variables across interactive single-step testing sessions
+      if (result.capturedCookies && Object.keys(result.capturedCookies).length > 0) {
+        setLiveCookieJar((prev) => ({ ...prev, ...result.capturedCookies }));
+      }
+      if (result.extractedVars && Object.keys(result.extractedVars).length > 0) {
+        setLiveVariablesMap((prev) => ({ ...prev, ...result.extractedVars }));
+      }
     } catch (err) {
       console.error('Failed to test single step:', err);
     } finally {
@@ -1175,6 +1351,16 @@ export default function WorkflowDetailPage() {
             <span className="px-2 py-0.5 bg-neutral-900/70 text-neutral-400 text-xs rounded-md font-mono shrink-0">
               {workflow.steps.length} {workflow.steps.length === 1 ? 'step' : 'steps'}
             </span>
+
+            {(workflow.isLocalOnly || workflow._id.startsWith('local-flow-')) ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-[#161619] text-amber-300 text-xs rounded-md font-mono shrink-0 border-none" title="Running locally on device (Local Storage)">
+                <CloudOff className="w-3.5 h-3.5 text-amber-400" /> Running Locally
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-[#161619] text-emerald-400 text-xs rounded-md font-mono shrink-0 border-none" title="Synced with Cloud Database">
+                <Cloud className="w-3.5 h-3.5 text-emerald-400" /> Cloud Synced
+              </span>
+            )}
           </div>
 
           {/* Global Base URL Override Control */}
@@ -1457,65 +1643,74 @@ export default function WorkflowDetailPage() {
             </AnimatePresence>
           </div>
 
-          {/* Button 3: Save */}
+          {/* Button 3: Auto-Save / Save Button */}
           <button
             onClick={handleSaveWorkflow}
-            disabled={saving}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-neutral-900 hover:bg-neutral-800 text-neutral-200 text-xs font-bold rounded-lg border-none transition-colors cursor-pointer"
+            disabled={saving || syncState === 'autosaving'}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg border-none transition-all cursor-pointer ${
+              syncState === 'autosaving'
+                ? 'bg-amber-950/80 text-amber-300'
+                : syncState === 'saved'
+                ? 'bg-emerald-950/80 text-emerald-300'
+                : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-200'
+            }`}
+            title="Auto-saves 5s after you finish editing. Click to save now."
           >
-            <Save className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-            <span>{saving ? 'Saving...' : 'Save'}</span>
+            {syncState === 'autosaving' ? (
+              <>
+                <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
+                <span>Auto-saving...</span>
+              </>
+            ) : syncState === 'saved' ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>Saved</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                <span>Save</span>
+              </>
+            )}
           </button>
 
           {/* Button 4: Run Workflow */}
           <button
             onClick={handleOpenPreflight}
             disabled={isRunning}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-lg border-none transition-all shadow-lg cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#f5f0e8] hover:bg-[#e6e1d9] text-black font-bold text-xs rounded-lg border-none transition-all shadow-md cursor-pointer"
           >
             {isRunning ? (
-              <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+              <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0 text-black" />
             ) : (
-              <Play className="w-3.5 h-3.5 fill-current shrink-0" />
+              <Play className="w-3.5 h-3.5 fill-current shrink-0 text-black" />
             )}
             <span>{isRunning ? 'Running Flow...' : 'Run Workflow'}</span>
           </button>
         </div>
       </div>
 
-      {/* Context Variable Pills Bar */}
-      {allExtractedVariables.length > 0 && (
-        <div className="p-2.5 bg-neutral-950/60 rounded-lg border border-white/5 flex items-center gap-2 flex-wrap text-xs">
-          <span className="text-[10px] text-neutral-400 font-bold uppercase flex items-center gap-1">
-            <Database className="w-3.5 h-3.5 text-rose-400" /> Extracted Variables:
-          </span>
-          {allExtractedVariables.map((v, i) => (
-            <span key={i} className="variable-pill text-[10px]">
-              {`{{${v.varName}}}`}
-            </span>
-          ))}
-        </div>
-      )}
+
 
       {/* Main Responsive Grid Layout */}
       <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         {/* Left Column: Sequence Steps List */}
-        <div className="lg:col-span-4 bg-neutral-950/80 p-4 rounded-xl space-y-4 border border-white/10 shadow-xl flex flex-col">
+        <div className="lg:col-span-4 bg-[#121214] p-4 rounded-xl space-y-4 border-none shadow-xl flex flex-col">
           <div className="flex-shrink-0 flex items-center justify-between border-b border-neutral-900 pb-3">
             <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-rose-400" /> Step Sequence
+              <Layers className="w-3.5 h-3.5 text-amber-400" /> Step Sequence
             </h3>
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => setIsAuthModalOpen(true)}
-                className="inline-flex items-center gap-1 text-[11px] bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 px-2 py-1 rounded-md transition-colors font-bold cursor-pointer border-none"
+                className="inline-flex items-center gap-1 text-[11px] bg-[#161619] hover:bg-[#242429] text-amber-300 px-2 py-1 rounded-md transition-colors font-bold cursor-pointer border-none"
                 title="Insert Google / Supabase / GitHub Auth Step Helpers"
               >
                 <Key className="w-3.5 h-3.5" /> Auth Helpers
               </button>
               <button
                 onClick={handleAddStep}
-                className="inline-flex items-center gap-1 text-[11px] bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 px-2.5 py-1 rounded-md transition-colors font-bold cursor-pointer border-none"
+                className="inline-flex items-center gap-1 text-[11px] bg-[#161619] hover:bg-[#242429] text-white px-2.5 py-1 rounded-md transition-colors font-bold cursor-pointer border-none"
               >
                 <Plus className="w-3.5 h-3.5" /> Add Step
               </button>
@@ -1530,12 +1725,12 @@ export default function WorkflowDetailPage() {
                 <div
                   key={step.stepId}
                   onClick={() => setActiveStepIndex(idx)}
-                  className={`p-3 rounded-lg cursor-pointer transition-all flex items-center justify-between gap-2 w-full overflow-hidden border ${
+                  className={`p-3 rounded-lg cursor-pointer transition-all flex items-center justify-between gap-2 w-full overflow-hidden border-none ${
                     isActive
-                      ? 'bg-neutral-900 text-white border-rose-500/50 shadow-md'
+                      ? 'bg-[#1a1a1e] text-white shadow-md'
                       : isSkipped
-                      ? 'bg-neutral-900/20 opacity-50 text-neutral-500 border-white/5'
-                      : 'bg-neutral-900/40 hover:bg-neutral-900/80 text-neutral-400 border-white/5'
+                      ? 'bg-[#121214]/40 opacity-50 text-neutral-500'
+                      : 'bg-[#161619] hover:bg-[#1a1a1e] text-neutral-400'
                   }`}
                 >
                   <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
@@ -1559,7 +1754,7 @@ export default function WorkflowDetailPage() {
                         handleMoveStep(idx, 'up');
                       }}
                       disabled={idx === 0}
-                      className="p-1 hover:text-white disabled:opacity-20"
+                      className="p-1 hover:text-white disabled:opacity-20 border-none bg-transparent"
                       title="Move Up"
                     >
                       <ChevronUp className="w-3.5 h-3.5" />
@@ -1570,7 +1765,7 @@ export default function WorkflowDetailPage() {
                         handleMoveStep(idx, 'down');
                       }}
                       disabled={idx === workflow.steps.length - 1}
-                      className="p-1 hover:text-white disabled:opacity-20"
+                      className="p-1 hover:text-white disabled:opacity-20 border-none bg-transparent"
                       title="Move Down"
                     >
                       <ChevronDown className="w-3.5 h-3.5" />
@@ -1580,7 +1775,7 @@ export default function WorkflowDetailPage() {
                         e.stopPropagation();
                         handleCloneStep(idx);
                       }}
-                      className="p-1 hover:text-white"
+                      className="p-1 hover:text-white border-none bg-transparent"
                       title="Clone Step"
                     >
                       <Copy className="w-3.5 h-3.5" />
@@ -1590,7 +1785,7 @@ export default function WorkflowDetailPage() {
                         e.stopPropagation();
                         handleDeleteStep(idx);
                       }}
-                      className="p-1 hover:text-rose-400"
+                      className="p-1 hover:text-rose-400 border-none bg-transparent"
                       title="Delete Step"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -1602,549 +1797,656 @@ export default function WorkflowDetailPage() {
           </div>
         </div>
 
-        {/* Right Column: Postman Inspector Workspace */}
-        <div className="lg:col-span-8 bg-neutral-950/80 p-4 sm:p-6 rounded-xl space-y-4 border border-white/10 shadow-xl flex flex-col w-full min-w-0">
-          {/* Step Header & URL Controls */}
-          <div className="space-y-3 pb-3 border-b border-neutral-900 w-full">
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+        {/* Right Column: Authentic Postman Inspector Workspace */}
+        <div ref={workspaceRef} className="lg:col-span-8 bg-[#121214] p-4 sm:p-5 rounded-2xl border-none shadow-2xl flex flex-col justify-between h-[calc(100vh-130px)] max-h-[calc(100vh-130px)] min-h-[550px] overflow-hidden w-full min-w-0 font-mono">
+          {/* 1. Step Title Header Bar */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pb-1 border-b border-neutral-900/80 w-full font-mono">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-neutral-500 font-bold flex-shrink-0">Step {activeStepIndex + 1}:</span>
               <input
                 type="text"
                 value={currentStep.name}
                 onChange={(e) => updateCurrentStep({ name: e.target.value })}
-                className="bg-neutral-900 text-xs sm:text-sm font-bold text-white px-3 py-2 rounded-lg w-full sm:flex-1 border border-white/10 focus:outline-none focus:border-rose-400 min-w-0"
+                className="bg-transparent text-xs sm:text-sm font-bold text-white px-2 py-1 rounded w-full sm:flex-1 border-none focus:outline-none focus:ring-1 focus:ring-white/20 min-w-0 font-mono"
               />
-
-              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                {/* Interactive OAuth Login Popup Trigger (Disabled) */}
-                <button
-                  disabled
-                  className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-neutral-900/60 text-neutral-500 font-bold text-xs rounded-lg border-none opacity-50 cursor-not-allowed whitespace-nowrap flex-shrink-0"
-                  title="OAuth login is currently disabled"
-                >
-                  <Globe className="w-3.5 h-3.5 text-neutral-500 flex-shrink-0" />
-                  <span>OAuth Disabled</span>
-                </button>
-
-                {/* Single Step Test Button */}
-                <button
-                  onClick={handleTestSingleStep}
-                  disabled={isSingleTesting}
-                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 font-bold text-xs rounded-lg border-none transition-colors whitespace-nowrap cursor-pointer flex-shrink-0"
-                >
-                  {isSingleTesting ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-rose-300 flex-shrink-0" />
-                  ) : (
-                    <Zap className="w-3.5 h-3.5 text-rose-300 fill-current flex-shrink-0" />
-                  )}
-                  <span>{isSingleTesting ? 'Testing...' : 'Test Step Now'}</span>
-                </button>
-              </div>
             </div>
 
-            {/* HTTP Method & Endpoint URL Bar */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full">
-              <div className="flex items-center gap-2 flex-1 min-w-0">
-                <select
-                  value={currentStep.method}
-                  onChange={(e) => updateCurrentStep({ method: e.target.value as any })}
-                  className="bg-neutral-900 text-rose-300 text-xs font-bold px-3 py-2 rounded-lg border border-white/10 focus:outline-none focus:border-rose-400 cursor-pointer flex-shrink-0"
-                >
-                  <option value="GET">GET</option>
-                  <option value="POST">POST</option>
-                  <option value="PUT">PUT</option>
-                  <option value="PATCH">PATCH</option>
-                  <option value="DELETE">DELETE</option>
-                  <option value="HEAD">HEAD</option>
-                </select>
-
-                <div className="relative w-full flex-1 min-w-0">
-                  <input
-                    type="text"
-                    placeholder="http://localhost:5000/api/v1/endpoint"
-                    value={currentStep.url}
-                    onFocus={() => setIsUrlDropdownOpen(true)}
-                    onChange={(e) => {
-                      updateCurrentStep({ url: e.target.value });
-                      setIsUrlDropdownOpen(true);
-                    }}
-                    className="w-full bg-neutral-900 text-xs text-white px-3 py-2 rounded-lg border border-white/10 focus:outline-none focus:border-rose-400 min-w-0 flex-1 font-mono"
-                  />
-
-                  {/* Interactive Sleek Autocomplete Overlay Dropdown */}
-                  {isUrlDropdownOpen && (
-                    <>
-                      <div className="fixed inset-0 z-10" onClick={() => setIsUrlDropdownOpen(false)} />
-                      <div className="absolute left-0 top-full mt-1.5 w-full bg-neutral-950/95 backdrop-blur-md rounded-xl p-2.5 shadow-2xl z-20 border border-white/10 space-y-2 max-h-64 overflow-y-auto font-mono text-xs">
-                        <div className="text-[10px] text-neutral-400 font-bold px-1 uppercase tracking-wider flex items-center justify-between">
-                          <span className="flex items-center gap-1">
-                            <Sparkles className="w-3 h-3 text-purple-400" /> Host & Endpoint Suggestions:
-                          </span>
-                          <span className="text-[9px] opacity-60">Click item to fill</span>
-                        </div>
-
-                        {/* Presets */}
-                        <div className="flex flex-wrap gap-1">
-                          {['http://localhost:3000', 'http://localhost:5000', 'http://localhost:8000', '{{baseUrl}}'].map((host) => (
-                            <button
-                              key={host}
-                              type="button"
-                              onClick={() => {
-                                const cleanHost = host.replace(/\/$/, '');
-                                if (!currentStep.url || currentStep.url.startsWith('/')) {
-                                  updateCurrentStep({ url: `${cleanHost}${currentStep.url.startsWith('/') ? '' : '/'}${currentStep.url}` });
-                                } else {
-                                  try {
-                                    const urlObj = new URL(currentStep.url);
-                                    updateCurrentStep({ url: `${cleanHost}${urlObj.pathname}${urlObj.search}` });
-                                  } catch {
-                                    const pathPart = currentStep.url.replace(/^https?:\/\/[^\/]+/, '');
-                                    updateCurrentStep({ url: `${cleanHost}${pathPart.startsWith('/') ? '' : '/'}${pathPart}` });
-                                  }
-                                }
-                                setIsUrlDropdownOpen(false);
-                              }}
-                              className="px-2 py-1 bg-neutral-900 hover:bg-neutral-800 text-purple-300 rounded text-[10px] font-bold transition-colors cursor-pointer border-none"
-                            >
-                              {host}
-                            </button>
-                          ))}
-                        </div>
-
-                        {/* Scanned & AI Spec Endpoints */}
-                        {scannedEndpoints.length > 0 && (
-                          <div className="space-y-1 pt-1.5 border-t border-neutral-900">
-                            {scannedEndpoints
-                              .filter((ep) => !currentStep.url || ep.path.toLowerCase().includes(currentStep.url.toLowerCase()) || ep.method.toLowerCase().includes(currentStep.url.toLowerCase()))
-                              .slice(0, 10)
-                              .map((ep, idx) => (
-                                <button
-                                  key={idx}
-                                  type="button"
-                                  onClick={() => {
-                                    let host = 'http://localhost:5000';
-                                    try {
-                                      if (currentStep.url && currentStep.url.startsWith('http')) {
-                                        host = new URL(currentStep.url).origin;
-                                      }
-                                    } catch {}
-                                    const path = ep.path.startsWith('/') ? ep.path : `/${ep.path}`;
-                                    updateCurrentStep({
-                                      method: ep.method,
-                                      url: `${host}${path}`,
-                                      bodyPayload: ep.suggestedBody || currentStep.bodyPayload,
-                                    });
-                                    setIsUrlDropdownOpen(false);
-                                  }}
-                                  className="w-full text-left px-2.5 py-1.5 hover:bg-neutral-900 rounded-lg flex items-center justify-between transition-colors text-[11px] cursor-pointer border-none"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                                      ep.method === 'POST' ? 'bg-amber-950 text-amber-300' :
-                                      ep.method === 'PUT' ? 'bg-sky-950 text-sky-300' :
-                                      ep.method === 'DELETE' ? 'bg-rose-950 text-rose-300' :
-                                      'bg-emerald-950 text-emerald-400'
-                                    }`}>
-                                      {ep.method}
-                                    </span>
-                                    <span className="text-white font-bold">{ep.path}</span>
-                                  </div>
-                                  <span className="text-[10px] text-neutral-400">{ep.framework || 'Route'}</span>
-                                </button>
-                              ))}
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 text-xs text-neutral-400 whitespace-nowrap justify-between sm:justify-end flex-shrink-0 pt-1 sm:pt-0">
-                <span>Exp Status:</span>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 px-2.5 py-1 bg-[#18181c] rounded-lg text-xs text-neutral-400 font-mono">
+                <span className="text-[11px]">Exp Status:</span>
                 <input
                   type="number"
                   value={currentStep.expectedStatusCode || 200}
                   onChange={(e) =>
                     updateCurrentStep({ expectedStatusCode: parseInt(e.target.value) || 200 })
                   }
-                  className="w-16 bg-neutral-900 text-rose-300 text-center py-1.5 rounded-lg border border-white/10 focus:outline-none focus:border-rose-400 font-bold text-xs"
+                  className="w-10 bg-transparent text-emerald-400 font-mono text-center font-bold text-xs focus:outline-none border-none"
                 />
+              </div>
+
+              <button
+                disabled
+                className="inline-flex items-center justify-center gap-1 px-2.5 py-1 bg-neutral-900/60 text-neutral-500 font-bold text-[11px] rounded-lg border-none opacity-50 cursor-not-allowed whitespace-nowrap"
+              >
+                <Globe className="w-3 h-3 text-neutral-500" />
+                <span>OAuth</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 2. Integrated Postman Address Bar & Test Step Now Button (Replaces "Send") */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full my-1 font-mono">
+            {/* Integrated Address Bar Pill Container */}
+            <div className="flex items-center bg-[#1c1c21] hover:bg-[#222228] focus-within:bg-[#222228] rounded-xl border border-neutral-700/60 p-1 flex-1 min-w-0 shadow-inner transition-colors">
+              {/* HTTP Method Dropdown */}
+              <select
+                value={currentStep.method}
+                onChange={(e) => updateCurrentStep({ method: e.target.value as any })}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border-none focus:outline-none cursor-pointer flex-shrink-0 bg-transparent transition-colors ${
+                  currentStep.method === 'POST' ? 'text-amber-400' :
+                  currentStep.method === 'PUT' ? 'text-sky-400' :
+                  currentStep.method === 'PATCH' ? 'text-purple-400' :
+                  currentStep.method === 'DELETE' ? 'text-rose-400' :
+                  'text-emerald-400'
+                }`}
+              >
+                <option value="GET" className="bg-[#1c1c21] text-emerald-400 font-bold">GET</option>
+                <option value="POST" className="bg-[#1c1c21] text-amber-400 font-bold">POST</option>
+                <option value="PUT" className="bg-[#1c1c21] text-sky-400 font-bold">PUT</option>
+                <option value="PATCH" className="bg-[#1c1c21] text-purple-400 font-bold">PATCH</option>
+                <option value="DELETE" className="bg-[#1c1c21] text-rose-400 font-bold">DELETE</option>
+                <option value="HEAD" className="bg-[#1c1c21] text-white font-bold">HEAD</option>
+              </select>
+
+              {/* Vertical Separator */}
+              <div className="w-[1px] h-4 bg-neutral-700/80 mx-1 flex-shrink-0" />
+
+              {/* Endpoint URL Input */}
+              <div className="relative w-full flex-1 min-w-0">
+                <input
+                  type="text"
+                  placeholder="https://hack-repo.vercel.app/api/schemes"
+                  value={currentStep.url}
+                  onFocus={() => setIsUrlDropdownOpen(true)}
+                  onChange={(e) => {
+                    updateCurrentStep({ url: e.target.value });
+                    setIsUrlDropdownOpen(true);
+                  }}
+                  className="w-full bg-transparent text-xs text-white px-2 py-1.5 focus:outline-none min-w-0 flex-1 font-mono placeholder-neutral-500 border-none"
+                />
+
+                {/* Autocomplete Overlay Dropdown */}
+                {isUrlDropdownOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setIsUrlDropdownOpen(false)} />
+                    <div className="absolute left-0 top-full mt-2 w-full bg-neutral-950/95 backdrop-blur-md rounded-xl p-2.5 shadow-2xl z-20 border border-white/10 space-y-2 max-h-64 overflow-y-auto font-mono text-xs">
+                      <div className="text-[10px] text-neutral-400 font-bold px-1 uppercase tracking-wider flex items-center justify-between">
+                        <span className="flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-purple-400" /> Host & Endpoint Suggestions:
+                        </span>
+                        <span className="text-[9px] opacity-60">Click item to fill</span>
+                      </div>
+
+                      {/* Presets */}
+                      <div className="flex flex-wrap gap-1">
+                        {['http://localhost:3000', 'http://localhost:5000', 'http://localhost:8000', '{{baseUrl}}'].map((host) => (
+                          <button
+                            key={host}
+                            type="button"
+                            onClick={() => {
+                              const cleanHost = host.replace(/\/$/, '');
+                              if (!currentStep.url || currentStep.url.startsWith('/')) {
+                                updateCurrentStep({ url: `${cleanHost}${currentStep.url.startsWith('/') ? '' : '/'}${currentStep.url}` });
+                              } else {
+                                try {
+                                  const urlObj = new URL(currentStep.url);
+                                  updateCurrentStep({ url: `${cleanHost}${urlObj.pathname}${urlObj.search}` });
+                                } catch {
+                                  const pathPart = currentStep.url.replace(/^https?:\/\/[^\/]+/, '');
+                                  updateCurrentStep({ url: `${cleanHost}${pathPart.startsWith('/') ? '' : '/'}${pathPart}` });
+                                }
+                              }
+                              setIsUrlDropdownOpen(false);
+                            }}
+                            className="px-2 py-1 bg-neutral-900 hover:bg-neutral-800 text-purple-300 rounded text-[10px] font-bold transition-colors cursor-pointer border-none"
+                          >
+                            {host}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Scanned Endpoints */}
+                      {scannedEndpoints.length > 0 && (
+                        <div className="space-y-1 pt-1.5 border-t border-neutral-900">
+                          {scannedEndpoints
+                            .filter((ep) => !currentStep.url || ep.path.toLowerCase().includes(currentStep.url.toLowerCase()) || ep.method.toLowerCase().includes(currentStep.url.toLowerCase()))
+                            .slice(0, 10)
+                            .map((ep, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => {
+                                  let host = 'http://localhost:5000';
+                                  try {
+                                    if (currentStep.url && currentStep.url.startsWith('http')) {
+                                      host = new URL(currentStep.url).origin;
+                                    }
+                                  } catch {}
+                                  const path = ep.path.startsWith('/') ? ep.path : `/${ep.path}`;
+                                  updateCurrentStep({
+                                    method: ep.method,
+                                    url: `${host}${path}`,
+                                    bodyPayload: ep.suggestedBody || currentStep.bodyPayload,
+                                  });
+                                  setIsUrlDropdownOpen(false);
+                                }}
+                                className="w-full text-left px-2.5 py-1.5 hover:bg-neutral-900 rounded-lg flex items-center justify-between transition-colors text-[11px] cursor-pointer border-none"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                    ep.method === 'POST' ? 'bg-amber-950 text-amber-300' :
+                                    ep.method === 'PUT' ? 'bg-sky-950 text-sky-300' :
+                                    ep.method === 'DELETE' ? 'bg-rose-950 text-rose-300' :
+                                    'bg-emerald-950 text-emerald-400'
+                                  }`}>
+                                    {ep.method}
+                                  </span>
+                                  <span className="text-white font-bold">{ep.path}</span>
+                                </div>
+                                <span className="text-[10px] text-neutral-400">{ep.framework || 'Route'}</span>
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
-            {/* AI Codebase Suggestions & Upgrade Banner */}
-            {aiSuggestions.length > 0 && (
-              <div className="p-3.5 bg-amber-950/40 rounded-xl space-y-2 border-none font-mono text-xs my-2 select-none">
-                <div className="flex items-center justify-between text-amber-300 font-bold">
-                  <span className="flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-amber-400" /> AI Codebase Insights & System Upgrades ({aiSuggestions.length})
-                  </span>
-                  <button onClick={() => setAiSuggestions([])} className="text-[10px] text-neutral-400 hover:text-white cursor-pointer">
-                    Dismiss ✕
-                  </button>
-                </div>
-                <div className="space-y-1 text-[11px] text-neutral-300">
-                  {aiSuggestions.map((sug, idx) => (
-                    <div key={idx} className="flex items-start gap-2">
-                      <span className="text-amber-400 font-bold">•</span>
-                      <span>{sug}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            {/* Active Test Session Jar Reset Pill */}
+            {(Object.keys(liveCookieJar).length > 0 || Object.keys(liveVariablesMap).length > 0) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setLiveCookieJar({});
+                  setLiveVariablesMap({});
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#18181c] hover:bg-[#242429] text-amber-300 text-[11px] font-bold rounded-xl border-none cursor-pointer flex-shrink-0 transition-colors"
+                title="Active interactive test session jar. Click to clear stored cookies and variables."
+              >
+                <Cookie className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>Active Jar ({Object.keys(liveCookieJar).length} cookies)</span>
+                <span className="text-neutral-500 hover:text-white text-xs ml-0.5">✕</span>
+              </button>
             )}
+
+            {/* Postman Primary Action Button: "Test Step Now" (Replaces "Send") */}
+            <button
+              onClick={handleTestSingleStep}
+              disabled={isSingleTesting}
+              className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold text-xs rounded-xl border-none transition-all shadow-md cursor-pointer flex-shrink-0"
+            >
+              {isSingleTesting ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-white flex-shrink-0" />
+              ) : (
+                <Zap className="w-3.5 h-3.5 text-white fill-current flex-shrink-0" />
+              )}
+              <span>{isSingleTesting ? 'Testing...' : 'Test Step Now'}</span>
+            </button>
           </div>
 
-          {/* Standardized API Response Telemetry Drawer */}
-          {singleTestResult && (
-            <ApiResponseDrawer
-              result={{
-                stepId: (singleTestResult as any).stepId,
-                stepName: singleTestResult.stepName,
-                url: singleTestResult.url,
-                method: singleTestResult.method,
-                status: singleTestResult.status as any,
-                statusCode: singleTestResult.statusCode,
-                latencyMs: singleTestResult.latencyMs,
-                errorMessage: singleTestResult.errorMessage,
-                responseBody: singleTestResult.responseBody,
-                responseSnippet: (singleTestResult as any).responseSnippet,
-                cookies: singleTestResult.capturedCookies,
-                extractedVars: singleTestResult.extractedVars,
-                executionSource: singleTestResult.url?.includes('localhost') || singleTestResult.url?.includes('127.0.0.1') ? 'browser' : 'cloud',
-                timestamp: new Date().toLocaleTimeString(),
-              }}
-              title={`Step Test Telemetry: ${workflow?.steps[activeStepIndex]?.name || 'Request'}`}
-              onClose={() => setSingleTestResult(null)}
-            />
+          {/* AI Suggestions Banner */}
+          {aiSuggestions.length > 0 && (
+            <div className="p-3.5 bg-amber-950/30 rounded-xl space-y-1.5 border-none font-mono text-xs my-3 select-none shadow-md">
+              <div className="flex items-center justify-between text-amber-300 font-bold">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-400" /> AI Codebase Insights ({aiSuggestions.length})
+                </span>
+                <button onClick={() => setAiSuggestions([])} className="text-[10px] text-neutral-400 hover:text-white cursor-pointer border-none bg-transparent">
+                  Dismiss ✕
+                </button>
+              </div>
+              <div className="space-y-1 text-[11px] text-neutral-300">
+                {aiSuggestions.map((sug, idx) => (
+                  <div key={idx} className="flex items-start gap-2">
+                    <span className="text-amber-400 font-bold">•</span>
+                    <span>{sug}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
 
-          {/* Navigation Tabs */}
-          <div className="flex items-center gap-1.5 sm:gap-2 pt-2 pb-2 border-b border-neutral-900 text-xs overflow-x-auto flex-nowrap scrollbar-thin w-full">
-            <button
-              onClick={() => setActiveTab('body')}
-              className={`px-3 sm:px-3.5 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 whitespace-nowrap text-xs cursor-pointer ${
-                activeTab === 'body'
-                  ? 'bg-rose-950 text-rose-300 border border-rose-500/30'
-                  : 'text-neutral-400 hover:text-white'
-              }`}
-            >
-              <Code className="w-3.5 h-3.5 flex-shrink-0" /> Body Payload
-            </button>
-            <button
-              onClick={() => setActiveTab('params')}
-              className={`px-3 sm:px-3.5 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 whitespace-nowrap text-xs cursor-pointer ${
-                activeTab === 'params'
-                  ? 'bg-rose-950 text-rose-300 border border-rose-500/30'
-                  : 'text-neutral-400 hover:text-white'
-              }`}
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5 flex-shrink-0" /> Params
-            </button>
-            <button
-              onClick={() => setActiveTab('headers')}
-              className={`px-3 sm:px-3.5 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 whitespace-nowrap text-xs cursor-pointer ${
-                activeTab === 'headers'
-                  ? 'bg-rose-950 text-rose-300 border border-rose-500/30'
-                  : 'text-neutral-400 hover:text-white'
-              }`}
-            >
-              <Key className="w-3.5 h-3.5 flex-shrink-0" /> Headers
-            </button>
-            <button
-              onClick={() => setActiveTab('cookies')}
-              className={`px-3 sm:px-3.5 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 whitespace-nowrap text-xs cursor-pointer ${
-                activeTab === 'cookies'
-                  ? 'bg-rose-950 text-rose-300 border border-rose-500/30'
-                  : 'text-neutral-400 hover:text-white'
-              }`}
-            >
-              <Cookie className="w-3.5 h-3.5 flex-shrink-0" /> Cookies & Carry
-            </button>
-            <button
-              onClick={() => setActiveTab('variables')}
-              className={`px-3 sm:px-3.5 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 whitespace-nowrap text-xs cursor-pointer ${
-                activeTab === 'variables'
-                  ? 'bg-rose-950 text-rose-300 border border-rose-500/30'
-                  : 'text-neutral-400 hover:text-white'
-              }`}
-            >
-              <Database className="w-3.5 h-3.5 flex-shrink-0" /> Extract Variables
-            </button>
-          </div>
+          {/* 3. REQUEST SECTION CONTAINER (Flat Postman Workspace) */}
+          <div className="space-y-3 my-2 flex-1 flex flex-col justify-start w-full min-w-0 overflow-hidden">
+            {/* Postman Tab Navigation Bar */}
+            {(() => {
+              const queryCount = Object.keys(currentStep.queryParams || {}).length;
+              const headerCount = Object.keys(currentStep.headers || {}).length;
+              const varCount = (currentStep.extractVariables || []).length;
+              const hasBody = Boolean(currentStep.bodyPayload && currentStep.bodyPayload.trim() !== '');
 
-          {/* Tab Content View */}
-          <div className="space-y-4 pt-2 w-full">
-            {/* Tab 1: JSON Body Payload */}
-            {activeTab === 'body' && (
-              <div className="space-y-2 w-full">
-                <div className="flex items-center justify-between text-xs text-neutral-400 flex-wrap gap-2">
-                  <span>JSON Request Body (supports <span className="variable-pill text-[10px]">{"{{userJwt}}"}</span> variables)</span>
+              return (
+                <div className="flex items-center gap-6 pt-1 pb-0 border-b border-neutral-800 text-xs overflow-x-auto flex-nowrap scrollbar-thin w-full font-mono">
                   <button
-                    onClick={() =>
-                      updateCurrentStep({
-                        bodyPayload: JSON.stringify({ email: 'user@example.com', pin: '1234' }, null, 2),
-                      })
-                    }
-                    className="text-rose-300 hover:underline text-[11px]"
+                    onClick={() => setActiveTab('body')}
+                    className={`pb-2 transition-all flex items-center gap-1.5 whitespace-nowrap text-xs cursor-pointer border-t-0 border-x-0 border-b-2 bg-transparent ${
+                      activeTab === 'body'
+                        ? 'border-[#f5f0e8] text-white font-bold'
+                        : 'border-transparent text-neutral-400 hover:text-neutral-200 font-medium'
+                    }`}
                   >
-                    Insert Example JSON
+                    <Code className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span>Body</span>
+                    {hasBody && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />}
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('params')}
+                    className={`pb-2 transition-all flex items-center gap-1.5 whitespace-nowrap text-xs cursor-pointer border-t-0 border-x-0 border-b-2 bg-transparent ${
+                      activeTab === 'params'
+                        ? 'border-[#f5f0e8] text-white font-bold'
+                        : 'border-transparent text-neutral-400 hover:text-neutral-200 font-medium'
+                    }`}
+                  >
+                    <SlidersHorizontal className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span>Params</span>
+                    {queryCount > 0 && (
+                      <span className="px-1.5 py-0.2 bg-[#1e1e24] text-amber-300 text-[10px] rounded-full font-bold">
+                        {queryCount}
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('headers')}
+                    className={`pb-2 transition-all flex items-center gap-1.5 whitespace-nowrap text-xs cursor-pointer border-t-0 border-x-0 border-b-2 bg-transparent ${
+                      activeTab === 'headers'
+                        ? 'border-[#f5f0e8] text-white font-bold'
+                        : 'border-transparent text-neutral-400 hover:text-neutral-200 font-medium'
+                    }`}
+                  >
+                    <Key className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span>Headers</span>
+                    {headerCount > 0 && (
+                      <span className="px-1.5 py-0.2 bg-[#1e1e24] text-emerald-400 text-[10px] rounded-full font-bold">
+                        {headerCount}
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('cookies')}
+                    className={`pb-2 transition-all flex items-center gap-1.5 whitespace-nowrap text-xs cursor-pointer border-t-0 border-x-0 border-b-2 bg-transparent ${
+                      activeTab === 'cookies'
+                        ? 'border-[#f5f0e8] text-white font-bold'
+                        : 'border-transparent text-neutral-400 hover:text-neutral-200 font-medium'
+                    }`}
+                  >
+                    <Cookie className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span>Cookies & Carry</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('variables')}
+                    className={`pb-2 transition-all flex items-center gap-1.5 whitespace-nowrap text-xs cursor-pointer border-t-0 border-x-0 border-b-2 bg-transparent ${
+                      activeTab === 'variables'
+                        ? 'border-[#f5f0e8] text-white font-bold'
+                        : 'border-transparent text-neutral-400 hover:text-neutral-200 font-medium'
+                    }`}
+                  >
+                    <Database className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span>Extract Variables</span>
+                    {varCount > 0 && (
+                      <span className="px-1.5 py-0.2 bg-[#1e1e24] text-purple-300 text-[10px] rounded-full font-bold">
+                        {varCount}
+                      </span>
+                    )}
                   </button>
                 </div>
-                <textarea
-                  rows={10}
-                  value={currentStep.bodyPayload || ''}
-                  onChange={(e) => updateCurrentStep({ bodyPayload: e.target.value })}
-                  placeholder='{\n  "email": "user@example.com",\n  "token": "{{authToken}}"\n}'
-                  className="w-full bg-neutral-900 text-xs font-mono text-emerald-400 p-3.5 rounded-xl border border-white/10 focus:outline-none focus:border-rose-400 leading-relaxed min-h-[220px] sm:min-h-[280px]"
-                />
-              </div>
-            )}
+              );
+            })()}
 
-            {/* Tab 2: Query Params Editor */}
-            {activeTab === 'params' && (
-              <div className="space-y-3 w-full">
-                <div className="flex items-center justify-between text-xs text-neutral-400 flex-wrap gap-2">
-                  <span>URL Query Parameters (`?key=value`)</span>
-                  <button
-                    onClick={() => {
-                      const existing = currentStep.queryParams || {};
-                      updateCurrentStep({
-                        queryParams: { ...existing, 'paramKey': 'paramVal' },
-                      });
-                    }}
-                    className="text-rose-300 hover:underline text-[11px]"
-                  >
-                    + Add Query Param
-                  </button>
-                </div>
+            {/* Request Tab Content Panel */}
+            <div className="space-y-4 pt-1 w-full flex-1 flex flex-col min-h-0 overflow-y-auto pr-1">
+              {/* Tab 1: Postman JSON Body Code Editor */}
+              {activeTab === 'body' && (
+                <div className="space-y-2.5 w-full flex-1 flex flex-col min-h-0">
+                  <div className="flex items-center justify-between text-xs text-neutral-400 flex-wrap gap-2 shrink-0">
+                    <div className="flex items-center gap-2 font-mono text-[11px]">
+                      <span className="px-2 py-0.5 bg-[#1a1a1e] text-neutral-300 rounded text-[10px] font-bold">
+                        JSON (application/json)
+                      </span>
+                      <span className="text-neutral-500">Supports <span className="text-amber-300">{"{{varName}}"}</span> variables</span>
+                    </div>
 
-                {Object.entries(currentStep.queryParams || {}).length === 0 ? (
-                  <div className="p-6 bg-neutral-900/50 rounded-xl text-center text-neutral-500 text-xs border border-white/5">
-                    No query parameters defined. Click "+ Add Query Param" above to append URL parameters.
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={handlePrettifyJson}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#18181c] hover:bg-[#222228] text-emerald-400 text-[11px] font-bold rounded-lg transition-colors cursor-pointer border-none"
+                        title="Format and prettify JSON payload"
+                      >
+                        <Sparkles className="w-3 h-3 text-emerald-400" />
+                        <span>Prettify JSON</span>
+                      </button>
+
+                      <button
+                        onClick={() =>
+                          updateCurrentStep({
+                            bodyPayload: JSON.stringify({ email: 'user@example.com', token: '{{authToken}}' }, null, 2),
+                          })
+                        }
+                        className="text-neutral-400 hover:text-white text-[11px] cursor-pointer bg-transparent border-none"
+                      >
+                        Insert Example JSON
+                      </button>
+                    </div>
                   </div>
-                ) : (
-                  Object.entries(currentStep.queryParams || {}).map(([key, val], idx) => (
-                    <div key={idx} className="grid grid-cols-12 gap-1.5 sm:gap-2 items-center w-full">
+
+                  <textarea
+                    value={(currentStep.bodyPayload || '').replace(/\\n/g, '\n').replace(/\\"/g, '"')}
+                    onChange={(e) => updateCurrentStep({ bodyPayload: e.target.value })}
+                    placeholder='{\n  "email": "user@example.com",\n  "token": "{{authToken}}"\n}'
+                    className="w-full flex-1 min-h-[120px] bg-[#0c0c0e] text-xs font-mono text-emerald-400 p-4 rounded-xl border-none focus:outline-none focus:ring-1 focus:ring-white/10 leading-relaxed shadow-inner resize-none overflow-y-auto"
+                  />
+                </div>
+              )}
+
+              {/* Tab 2: Postman Query Params Key-Value Editor */}
+              {activeTab === 'params' && (
+                <div className="space-y-3 w-full">
+                  <div className="flex items-center justify-between text-xs text-neutral-400 flex-wrap gap-2">
+                    <span className="font-mono">URL Query Parameters (`?key=value`)</span>
+                    <button
+                      onClick={() => {
+                        const existing = currentStep.queryParams || {};
+                        updateCurrentStep({
+                          queryParams: { ...existing, 'paramKey': 'paramVal' },
+                        });
+                      }}
+                      className="px-2.5 py-1 bg-[#18181c] hover:bg-[#222228] text-amber-300 text-[11px] font-bold rounded-lg transition-colors cursor-pointer border-none"
+                    >
+                      + Add Query Param
+                    </button>
+                  </div>
+
+                  {Object.entries(currentStep.queryParams || {}).length === 0 ? (
+                    <div className="p-6 bg-[#0c0c0e] rounded-xl text-center text-neutral-500 text-xs border-none font-mono">
+                      No query parameters configured. Click "+ Add Query Param" above to append URL query parameters.
+                    </div>
+                  ) : (
+                    Object.entries(currentStep.queryParams || {}).map(([key, val], idx) => (
+                      <div key={idx} className="grid grid-cols-12 gap-2 items-center w-full font-mono">
+                        <input
+                          type="text"
+                          value={key}
+                          onChange={(e) => {
+                            const newKey = e.target.value;
+                            const copy = { ...currentStep.queryParams };
+                            delete copy[key];
+                            copy[newKey] = val;
+                            updateCurrentStep({ queryParams: copy });
+                          }}
+                          placeholder="Key (e.g. page)"
+                          className="col-span-5 bg-[#161619] text-xs px-3 py-2 rounded-lg text-white border-none focus:outline-none focus:ring-1 focus:ring-white/20 min-w-0"
+                        />
+                        <input
+                          type="text"
+                          value={val}
+                          onChange={(e) => {
+                            const copy = { ...currentStep.queryParams };
+                            copy[key] = e.target.value;
+                            updateCurrentStep({ queryParams: copy });
+                          }}
+                          placeholder="Value (e.g. 1)"
+                          className="col-span-6 bg-[#161619] text-xs px-3 py-2 rounded-lg text-amber-300 border-none focus:outline-none focus:ring-1 focus:ring-white/20 min-w-0"
+                        />
+                        <button
+                          onClick={() => {
+                            const copy = { ...currentStep.queryParams };
+                            delete copy[key];
+                            updateCurrentStep({ queryParams: copy });
+                          }}
+                          className="col-span-1 p-1.5 text-neutral-500 hover:text-rose-400 flex items-center justify-center bg-transparent border-none cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {/* Tab 3: Postman Custom Headers Editor */}
+              {activeTab === 'headers' && (
+                <div className="space-y-3 w-full">
+                  <div className="flex items-center justify-between text-xs text-neutral-400 flex-wrap gap-2">
+                    <span className="font-mono">Custom HTTP Request Headers</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const existing = currentStep.headers || {};
+                          updateCurrentStep({
+                            headers: { ...existing, Authorization: 'Bearer {{userJwt}}' },
+                          });
+                        }}
+                        className="px-2.5 py-1 bg-[#18181c] hover:bg-[#222228] text-emerald-400 text-[11px] font-bold rounded-lg transition-colors cursor-pointer border-none"
+                      >
+                        + Quick Bearer Token
+                      </button>
+                      <button
+                        onClick={() => {
+                          const existing = currentStep.headers || {};
+                          updateCurrentStep({
+                            headers: { ...existing, 'Custom-Header': 'value' },
+                          });
+                        }}
+                        className="px-2.5 py-1 bg-[#18181c] hover:bg-[#222228] text-neutral-300 text-[11px] font-bold rounded-lg transition-colors cursor-pointer border-none"
+                      >
+                        + Add Header
+                      </button>
+                    </div>
+                  </div>
+
+                  {Object.entries(currentStep.headers || {}).map(([key, val], idx) => (
+                    <div key={idx} className="grid grid-cols-12 gap-2 items-center w-full font-mono">
                       <input
                         type="text"
                         value={key}
                         onChange={(e) => {
                           const newKey = e.target.value;
-                          const copy = { ...currentStep.queryParams };
+                          const copy = { ...currentStep.headers };
                           delete copy[key];
                           copy[newKey] = val;
-                          updateCurrentStep({ queryParams: copy });
+                          updateCurrentStep({ headers: copy });
                         }}
-                        placeholder="Key (e.g. page)"
-                        className="col-span-5 bg-neutral-900 text-xs px-3 py-2 rounded-lg text-white border border-white/10 focus:outline-none focus:border-rose-400 min-w-0"
+                        placeholder="Header (e.g. Authorization)"
+                        className="col-span-5 bg-[#161619] text-xs px-3 py-2 rounded-lg text-white border-none focus:outline-none focus:ring-1 focus:ring-white/20 min-w-0"
                       />
                       <input
                         type="text"
                         value={val}
                         onChange={(e) => {
-                          const copy = { ...currentStep.queryParams };
+                          const copy = { ...currentStep.headers };
                           copy[key] = e.target.value;
-                          updateCurrentStep({ queryParams: copy });
+                          updateCurrentStep({ headers: copy });
                         }}
-                        placeholder="Value (e.g. 1)"
-                        className="col-span-6 bg-neutral-900 text-xs px-3 py-2 rounded-lg text-white border border-white/10 focus:outline-none focus:border-rose-400 min-w-0"
+                        placeholder="Value (e.g. Bearer {{userJwt}})"
+                        className="col-span-6 bg-[#161619] text-xs px-3 py-2 rounded-lg text-emerald-300 border-none focus:outline-none focus:ring-1 focus:ring-white/20 min-w-0"
                       />
                       <button
                         onClick={() => {
-                          const copy = { ...currentStep.queryParams };
+                          const copy = { ...currentStep.headers };
                           delete copy[key];
-                          updateCurrentStep({ queryParams: copy });
+                          updateCurrentStep({ headers: copy });
                         }}
-                        className="col-span-1 p-1.5 text-neutral-500 hover:text-rose-400 flex items-center justify-center"
+                        className="col-span-1 p-1.5 text-neutral-500 hover:text-rose-400 flex items-center justify-center bg-transparent border-none cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
-                  ))
-                )}
-              </div>
-            )}
-
-            {/* Tab 3: Custom Headers */}
-            {activeTab === 'headers' && (
-              <div className="space-y-3 w-full">
-                <div className="flex items-center justify-between text-xs text-neutral-400 flex-wrap gap-2">
-                  <span>Custom HTTP Request Headers</span>
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => {
-                        const existing = currentStep.headers || {};
-                        updateCurrentStep({
-                          headers: { ...existing, Authorization: 'Bearer {{userJwt}}' },
-                        });
-                      }}
-                      className="text-emerald-400 hover:underline text-[11px] font-bold"
-                    >
-                      + Quick Bearer Token
-                    </button>
-                    <button
-                      onClick={() => {
-                        const existing = currentStep.headers || {};
-                        updateCurrentStep({
-                          headers: { ...existing, 'Custom-Header': 'value' },
-                        });
-                      }}
-                      className="text-rose-300 hover:underline text-[11px]"
-                    >
-                      + Add Header
-                    </button>
-                  </div>
+                  ))}
                 </div>
+              )}
 
-                {Object.entries(currentStep.headers || {}).map(([key, val], idx) => (
-                  <div key={idx} className="grid grid-cols-12 gap-1.5 sm:gap-2 items-center w-full">
-                    <input
-                      type="text"
-                      value={key}
-                      onChange={(e) => {
-                        const newKey = e.target.value;
-                        const copy = { ...currentStep.headers };
-                        delete copy[key];
-                        copy[newKey] = val;
-                        updateCurrentStep({ headers: copy });
-                      }}
-                      placeholder="Header (e.g. Authorization)"
-                      className="col-span-5 bg-neutral-900 text-xs px-3 py-2 rounded-lg text-white border border-white/10 focus:outline-none focus:border-rose-400 min-w-0"
-                    />
-                    <input
-                      type="text"
-                      value={val}
-                      onChange={(e) => {
-                        const copy = { ...currentStep.headers };
-                        copy[key] = e.target.value;
-                        updateCurrentStep({ headers: copy });
-                      }}
-                      placeholder="Value (e.g. Bearer {{userJwt}})"
-                      className="col-span-6 bg-neutral-900 text-xs px-3 py-2 rounded-lg text-rose-300 border border-white/10 focus:outline-none focus:border-rose-400 min-w-0"
-                    />
-                    <button
-                      onClick={() => {
-                        const copy = { ...currentStep.headers };
-                        delete copy[key];
-                        updateCurrentStep({ headers: copy });
-                      }}
-                      className="col-span-1 p-1.5 text-neutral-500 hover:text-rose-400 flex items-center justify-center"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Tab 4: Cookie Jar Settings */}
-            {activeTab === 'cookies' && (
-              <div className="p-4 bg-neutral-900/90 rounded-xl border border-white/10 space-y-5 text-xs w-full">
-                {anyPreviousCookieCapture && (
-                  <div className="p-3 bg-rose-950/40 text-rose-300 rounded-lg border border-rose-500/20 flex items-center gap-2 text-[11px] font-bold">
-                    <Sparkles className="w-4 h-4 text-rose-300 flex-shrink-0" />
-                    Previous step captures cookies! Cookie carry is automatically enabled for this step.
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1">
-                    <span className="font-bold text-white flex items-center gap-1.5 text-sm">
-                      <Cookie className="w-4 h-4 text-rose-400" /> Capture Cookies from Response
-                    </span>
-                    <p className="text-neutral-400 text-[11px]">
-                      Automatically records `Set-Cookie` headers from this endpoint response into active execution jar.
-                    </p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={currentStep.captureCookies !== false}
-                    onChange={(e) => updateCurrentStep({ captureCookies: e.target.checked })}
-                    className="w-4.5 h-4.5 accent-rose-500 rounded cursor-pointer"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between border-t border-neutral-800 pt-4">
-                  <div className="space-y-1">
-                    <span className="font-bold text-white flex items-center gap-1.5 text-sm">
-                      <Database className="w-4 h-4 text-rose-400" /> Carry Cookies in Request Header
-                    </span>
-                    <p className="text-neutral-400 text-[11px]">
-                      Appends all accumulated cookies from previous steps into `Cookie` request header.
-                    </p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={currentStep.carryCookies !== false}
-                    onChange={(e) => updateCurrentStep({ carryCookies: e.target.checked })}
-                    className="w-4.5 h-4.5 accent-rose-500 rounded cursor-pointer"
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Tab 5: Variable Extraction */}
-            {activeTab === 'variables' && (
-              <div className="space-y-3 w-full">
-                <div className="flex items-center justify-between text-xs text-neutral-400 flex-wrap gap-2">
-                  <span>Extract Response JSON Values into Context Variables</span>
-                  <button
-                    onClick={() => {
-                      const list = currentStep.extractVariables || [];
-                      updateCurrentStep({
-                        extractVariables: [...list, { varName: 'userJwt', jsonPath: 'token' }],
-                      });
-                    }}
-                    className="text-rose-300 hover:underline text-[11px]"
-                  >
-                    + Add Variable Extract Rule
-                  </button>
-                </div>
-
-                {(currentStep.extractVariables || []).length === 0 ? (
-                  <div className="p-6 bg-neutral-900/50 rounded-xl border border-white/5 text-center text-neutral-500 text-xs">
-                    No extraction rules defined. Extract variables like `token` or `data.user.id` to pass into future steps as `{"{{userJwt}}"}`.
-                  </div>
-                ) : (
-                  (currentStep.extractVariables || []).map((ext, idx) => (
-                    <div key={idx} className="grid grid-cols-12 gap-1.5 sm:gap-2 items-center w-full">
-                      <input
-                        type="text"
-                        value={ext.varName}
-                        onChange={(e) => {
-                          const list = [...(currentStep.extractVariables || [])];
-                          list[idx].varName = e.target.value;
-                          updateCurrentStep({ extractVariables: list });
-                        }}
-                        placeholder="Variable (e.g. userJwt)"
-                        className="col-span-5 bg-neutral-900 text-xs px-3 py-2 rounded-lg text-rose-300 font-bold border border-white/10 focus:outline-none focus:border-rose-400 min-w-0"
-                      />
-                      <input
-                        type="text"
-                        value={ext.jsonPath}
-                        onChange={(e) => {
-                          const list = [...(currentStep.extractVariables || [])];
-                          list[idx].jsonPath = e.target.value;
-                          updateCurrentStep({ extractVariables: list });
-                        }}
-                        placeholder="JSON Path (e.g. token)"
-                        className="col-span-6 bg-neutral-900 text-xs px-3 py-2 rounded-lg text-white border border-white/10 focus:outline-none focus:border-rose-400 min-w-0"
-                      />
-                      <button
-                        onClick={() => {
-                          const list = (currentStep.extractVariables || []).filter((_, i) => i !== idx);
-                          updateCurrentStep({ extractVariables: list });
-                        }}
-                        className="col-span-1 p-1.5 text-neutral-500 hover:text-rose-400 flex items-center justify-center"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+              {/* Tab 4: Cookie Jar & Carryover */}
+              {activeTab === 'cookies' && (
+                <div className="p-4 bg-[#0c0c0e] rounded-xl space-y-4 text-xs w-full font-mono border-none">
+                  {anyPreviousCookieCapture && (
+                    <div className="p-3 bg-[#18181c] text-emerald-400 rounded-lg flex items-center gap-2 text-[11px] font-bold border-none">
+                      <Sparkles className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                      Previous step captures cookies! Cookie carryover is active.
                     </div>
-                  ))
-                )}
-              </div>
-            )}
+                  )}
+
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <span className="font-bold text-white flex items-center gap-1.5 text-xs">
+                        <Cookie className="w-4 h-4 text-amber-400" /> Capture Response Cookies
+                      </span>
+                      <p className="text-neutral-400 text-[11px]">
+                        Records `Set-Cookie` headers from this endpoint response into active execution jar.
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={currentStep.captureCookies !== false}
+                      onChange={(e) => updateCurrentStep({ captureCookies: e.target.checked })}
+                      className="w-4.5 h-4.5 accent-amber-500 rounded cursor-pointer"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between border-t border-neutral-800 pt-3">
+                    <div className="space-y-1">
+                      <span className="font-bold text-white flex items-center gap-1.5 text-xs">
+                        <Database className="w-4 h-4 text-sky-400" /> Carry Cookies in Request Header
+                      </span>
+                      <p className="text-neutral-400 text-[11px]">
+                        Appends accumulated cookies from previous steps into `Cookie` request header.
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={currentStep.carryCookies !== false}
+                      onChange={(e) => updateCurrentStep({ carryCookies: e.target.checked })}
+                      className="w-4.5 h-4.5 accent-sky-500 rounded cursor-pointer"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 5: Variable Extraction Rules */}
+              {activeTab === 'variables' && (
+                <div className="space-y-3 w-full">
+                  <div className="flex items-center justify-between text-xs text-neutral-400 flex-wrap gap-2">
+                    <span className="font-mono">Extract Response JSON Values into Context Variables</span>
+                    <button
+                      onClick={() => {
+                        const list = currentStep.extractVariables || [];
+                        updateCurrentStep({
+                          extractVariables: [...list, { varName: 'userJwt', jsonPath: 'token' }],
+                        });
+                      }}
+                      className="px-2.5 py-1 bg-[#18181c] hover:bg-[#222228] text-purple-300 text-[11px] font-bold rounded-lg transition-colors cursor-pointer border-none"
+                    >
+                      + Add Variable Rule
+                    </button>
+                  </div>
+
+                  {(currentStep.extractVariables || []).length === 0 ? (
+                    <div className="p-6 bg-[#0c0c0e] rounded-xl text-center text-neutral-500 text-xs border-none font-mono">
+                      No extraction rules defined. Extract variables like `token` or `data.user.id` to pass into future steps as `{"{{userJwt}}"}`.
+                    </div>
+                  ) : (
+                    (currentStep.extractVariables || []).map((ext, idx) => (
+                      <div key={idx} className="grid grid-cols-12 gap-2 items-center w-full font-mono">
+                        <input
+                          type="text"
+                          value={ext.varName}
+                          onChange={(e) => {
+                            const list = [...(currentStep.extractVariables || [])];
+                            list[idx].varName = e.target.value;
+                            updateCurrentStep({ extractVariables: list });
+                          }}
+                          placeholder="Variable (e.g. userJwt)"
+                          className="col-span-5 bg-[#161619] text-xs px-3 py-2 rounded-lg text-purple-300 font-bold border-none focus:outline-none focus:ring-1 focus:ring-white/20 min-w-0"
+                        />
+                        <input
+                          type="text"
+                          value={ext.jsonPath}
+                          onChange={(e) => {
+                            const list = [...(currentStep.extractVariables || [])];
+                            list[idx].jsonPath = e.target.value;
+                            updateCurrentStep({ extractVariables: list });
+                          }}
+                          placeholder="JSON Path (e.g. token)"
+                          className="col-span-6 bg-[#161619] text-xs px-3 py-2 rounded-lg text-white border-none focus:outline-none focus:ring-1 focus:ring-white/20 min-w-0"
+                        />
+                        <button
+                          onClick={() => {
+                            const list = (currentStep.extractVariables || []).filter((_, i) => i !== idx);
+                            updateCurrentStep({ extractVariables: list });
+                          }}
+                          className="col-span-1 p-1.5 text-neutral-500 hover:text-rose-400 flex items-center justify-center bg-transparent border-none cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Postman Horizontal Split-Pane Drag Resizer Handle */}
+          <div
+            onMouseDown={handleMouseDownResizer}
+            onTouchStart={handleTouchStartResizer}
+            className={`w-full h-3.5 my-0.5 cursor-row-resize flex items-center justify-center transition-colors select-none group shrink-0 rounded-md ${
+              isDraggingResizer ? 'bg-blue-600/70 shadow-sm' : 'bg-[#18181c] hover:bg-blue-500/30'
+            }`}
+            title="Drag up/down to resize Request & Response panels"
+          >
+            <div className={`h-1 rounded-full transition-all pointer-events-none ${isDraggingResizer ? 'w-24 bg-white' : 'w-12 bg-neutral-600 group-hover:bg-blue-400'}`} />
+          </div>
+
+          {/* 4. BOTTOM RESPONSE SECTION (Always Present & Resizable Like Postman) */}
+          <div style={{ height: `${responsePanelHeight}px` }} className="w-full flex flex-col overflow-hidden shrink-0">
+            <ApiResponseDrawer
+              result={
+                singleTestResult
+                  ? {
+                      stepId: (singleTestResult as any).stepId,
+                      stepName: singleTestResult.stepName,
+                      url: singleTestResult.url,
+                      method: singleTestResult.method,
+                      status: singleTestResult.status as any,
+                      statusCode: singleTestResult.statusCode,
+                      latencyMs: singleTestResult.latencyMs,
+                      errorMessage: singleTestResult.errorMessage,
+                      responseBody: singleTestResult.responseBody,
+                      responseSnippet: (singleTestResult as any).responseSnippet,
+                      headers: (singleTestResult as any).responseHeaders || (singleTestResult as any).headers || {},
+                      cookies: singleTestResult.capturedCookies,
+                      extractedVars: singleTestResult.extractedVars,
+                      executionSource: singleTestResult.url?.includes('localhost') || singleTestResult.url?.includes('127.0.0.1') ? 'browser' : 'cloud',
+                      timestamp: new Date().toLocaleTimeString(),
+                    }
+                  : {
+                      status: 'skipped',
+                      statusCode: 0,
+                      latencyMs: 0,
+                      responseSnippet: 'Response panel ready. Click Test Step Now above to execute request and inspect live payload, headers & cookies.',
+                      headers: {},
+                      cookies: {},
+                      extractedVars: {},
+                    }
+              }
+              title={`Response Telemetry: ${workflow?.steps[activeStepIndex]?.name || 'Request'}`}
+              onClose={singleTestResult ? () => setSingleTestResult(null) : undefined}
+            />
           </div>
         </div>
       </div>

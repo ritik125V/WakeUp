@@ -3,6 +3,12 @@
 :root {
   --background: #000000;
   --foreground: #e5e5e5;
+  --panel-base: #121214;
+  --panel-interactive: #1a1a1e;
+  --panel-hover: #242429;
+  --input-fill: #161619;
+  --accent-primary: #f5f0e8;
+  --accent-hover: #e8e2d8;
 }
 
 @theme inline {
@@ -18,6 +24,11 @@
   box-shadow: none !important;
 }
 
+*:focus-visible {
+  outline: 1px solid rgba(245, 240, 232, 0.4) !important;
+  outline-offset: 2px;
+}
+
 body {
   background-color: #000000;
   color: #e5e5e5;
@@ -28,18 +39,20 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Minimalist Muted Dark Panels */
+/* Minimalist Dark Panels with 8px (rounded-lg) Corner Radius */
 .glass-panel {
-  background: #0a0a0a;
+  background: #121214;
+  border-radius: 8px;
 }
 
 .glass-panel-interactive {
-  background: #0d0d0d;
-  transition: background-color 0.15s ease;
+  background: #1a1a1e;
+  border-radius: 8px;
+  transition: background-color 0.15s ease, transform 0.15s ease;
 }
 
 .glass-panel-interactive:hover {
-  background: #141414;
+  background: #242429;
 }
 
 /* Minimalist Method Badge Colors (No Borders, Muted Tones) */
@@ -100,7 +113,7 @@ body {
 .touch-press {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
-  transition: transform 0.12s ease, opacity 0.12s ease;
+  transition: transform 0.12s ease, opacity 0.12s ease, background-color 0.12s ease;
 }
 
 .touch-press:active {

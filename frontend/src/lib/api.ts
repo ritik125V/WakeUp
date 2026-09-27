@@ -383,19 +383,57 @@ export interface WorkflowData {
   notificationEmail?: string;
   lastTriggeredBy?: string;
   lastTriggeredAt?: string;
+  lastRunAt?: string;
   lastRunStatus?: 'success' | 'failed' | 'pending' | 'none';
+  isLocalOnly?: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
+import {
+  getLocalWorkflows,
+  getLocalWorkflowById,
+  saveLocalWorkflow,
+  setLocalWorkflowsContainer,
+  deleteLocalWorkflow,
+  getLocalRunHistory,
+  saveLocalRunReport,
+} from './workflowLocalStorage';
+import {
+  executeWakeUpApiStep,
+  executeWakeUpApiFlow,
+  WakeUpApiTelemetry,
+  WakeUpFlowSummary,
+} from './WakeUpApiEngine';
+
 export const fetchWorkflows = async (): Promise<{ workflows: WorkflowData[] }> => {
-  const response = await apiClient.get<{ workflows: WorkflowData[] }>('/workflows');
-  return response.data;
+  if (typeof window !== 'undefined' && !localStorage.getItem('wakeup_auth_token')) {
+    return { workflows: getLocalWorkflows() };
+  }
+  try {
+    const response = await apiClient.get<{ workflows: WorkflowData[] }>('/workflows');
+    if (response.data?.workflows) {
+      setLocalWorkflowsContainer(response.data.workflows);
+    }
+    return response.data;
+  } catch (err) {
+    return { workflows: getLocalWorkflows() };
+  }
 };
 
 export const fetchWorkflowById = async (id: string): Promise<{ workflow: WorkflowData }> => {
-  const response = await apiClient.get<{ workflow: WorkflowData }>(`/workflows/${id}`);
-  return response.data;
+  if (id.startsWith('local-flow-') || (typeof window !== 'undefined' && !localStorage.getItem('wakeup_auth_token'))) {
+    const local = getLocalWorkflowById(id);
+    if (local) return { workflow: local };
+  }
+  try {
+    const response = await apiClient.get<{ workflow: WorkflowData }>(`/workflows/${id}`);
+    return response.data;
+  } catch (err) {
+    const local = getLocalWorkflowById(id);
+    if (local) return { workflow: local };
+    throw err;
+  }
 };
 
 export const createWorkflow = async (data: {
@@ -406,7 +444,16 @@ export const createWorkflow = async (data: {
   githubRepo?: string;
   githubBranch?: string;
 }): Promise<{ workflow: WorkflowData }> => {
+  if (typeof window !== 'undefined' && !localStorage.getItem('wakeup_auth_token')) {
+    const created = saveLocalWorkflow({
+      name: data.name,
+      description: data.description,
+      steps: data.steps,
+    });
+    return { workflow: created };
+  }
   const response = await apiClient.post<{ workflow: WorkflowData }>('/workflows', data);
+  saveLocalWorkflow(response.data.workflow);
   return response.data;
 };
 
@@ -414,12 +461,22 @@ export const updateWorkflow = async (
   id: string,
   data: Partial<WorkflowData>
 ): Promise<{ workflow: WorkflowData }> => {
+  if (id.startsWith('local-flow-') || (typeof window !== 'undefined' && !localStorage.getItem('wakeup_auth_token'))) {
+    const updated = saveLocalWorkflow({ _id: id, ...data } as any);
+    return { workflow: updated };
+  }
   const response = await apiClient.put<{ workflow: WorkflowData }>(`/workflows/${id}`, data);
+  saveLocalWorkflow(response.data.workflow);
   return response.data;
 };
 
 export const deleteWorkflow = async (id: string): Promise<void> => {
+  if (id.startsWith('local-flow-') || (typeof window !== 'undefined' && !localStorage.getItem('wakeup_auth_token'))) {
+    deleteLocalWorkflow(id);
+    return;
+  }
   await apiClient.delete(`/workflows/${id}`);
+  deleteLocalWorkflow(id);
 };
 
 export const triggerWorkflow = async (id: string): Promise<{ message: string; workflowId: string }> => {
@@ -605,6 +662,13 @@ export async function browserDirectTestStep(
       } catch {}
     }
 
+    const responseHeaders: Record<string, string> = {};
+    if (response && response.headers) {
+      response.headers.forEach((val, key) => {
+        responseHeaders[key] = val;
+      });
+    }
+
     return {
       stepId: step.stepId,
       stepName: step.name,
@@ -615,6 +679,7 @@ export async function browserDirectTestStep(
       latencyMs,
       errorMessage,
       responseSnippet,
+      responseHeaders,
       extractedVars,
     };
   } catch (err: any) {
@@ -637,125 +702,41 @@ export const testSingleWorkflowStep = async (
   variablesContext?: Record<string, string>,
   cookiesContext?: Record<string, string>
 ): Promise<any> => {
-  let resolvedUrl = step.url || '';
-  if (variablesContext) {
-    Object.entries(variablesContext).forEach(([k, v]) => {
-      resolvedUrl = resolvedUrl.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), v);
-    });
-  }
-
-  const isLocalhost =
-    resolvedUrl.includes('localhost') ||
-    resolvedUrl.includes('127.0.0.1') ||
-    resolvedUrl.includes('0.0.0.0') ||
-    resolvedUrl.includes('::1');
-
-  if (isLocalhost) {
-    // Zero setup direct browser execution for localhost URLs (bypasses remote server loopback)
-    return await browserDirectTestStep(step, variablesContext, cookiesContext);
-  }
-
-  try {
-    const response = await apiClient.post('/workflows/test-step', { step, variablesContext, cookiesContext });
-    return response.data.result;
-  } catch (err: any) {
-    // Fallback to browser direct execution if cloud server request fails
-    return await browserDirectTestStep(step, variablesContext, cookiesContext);
-  }
+  return await executeWakeUpApiStep(step, variablesContext, cookiesContext);
 };
 
 export async function executeWorkflowInBrowser(
   workflow: WorkflowData,
   onStepCompleted?: (telemetry: any) => void
 ): Promise<any> {
-  const startTime = Date.now();
-  const stepLogs: any[] = [];
-  let variablesContext: Record<string, string> = {};
-  let cookiesContext: Record<string, string> = {};
-  let overallStatus: 'success' | 'failed' | 'error' = 'success';
+  const summary = await executeWakeUpApiFlow(workflow, onStepCompleted);
 
-  for (let idx = 0; idx < workflow.steps.length; idx++) {
-    const step = workflow.steps[idx];
-
-    if (step.skipped) {
-      const skippedTelemetry = {
-        stepIndex: idx + 1,
-        stepId: step.stepId,
-        stepName: step.name,
-        method: step.method,
-        url: step.url,
-        requestHeaders: step.headers || {},
-        latencyMs: 0,
-        status: 'skipped',
-        errorMessage: 'Step skipped by user preference',
-        timestamp: new Date().toISOString(),
-      };
-      stepLogs.push(skippedTelemetry);
-      if (onStepCompleted) onStepCompleted(skippedTelemetry);
-      continue;
-    }
-
-    const stepResult = await browserDirectTestStep(step, variablesContext, cookiesContext);
-
-    // Merge extracted variables into context for subsequent steps
-    if (stepResult.extractedVars) {
-      variablesContext = { ...variablesContext, ...stepResult.extractedVars };
-    }
-
-    const telemetry = {
-      stepIndex: idx + 1,
-      stepId: step.stepId,
-      stepName: step.name,
-      method: step.method,
-      url: stepResult.url || step.url,
-      requestHeaders: step.headers || {},
-      statusCode: stepResult.statusCode,
-      responseBody: stepResult.responseSnippet || stepResult.responseBody,
-      latencyMs: stepResult.latencyMs || 0,
-      status: stepResult.status === 'success' ? 'success' : 'failed',
-      errorMessage: stepResult.errorMessage,
-      capturedCookies: stepResult.capturedCookies || {},
-      extractedVars: stepResult.extractedVars || {},
-      timestamp: new Date().toISOString(),
-    };
-
-    if (telemetry.status === 'failed') {
-      overallStatus = 'failed';
-    }
-
-    stepLogs.push(telemetry);
-    if (onStepCompleted) onStepCompleted(telemetry);
-  }
-
-  const finishedAt = new Date().toISOString();
-  const totalTimeMs = Date.now() - startTime;
-
-  const resSummary = {
-    workflowName: workflow.name,
-    startedAt: new Date(startTime).toISOString(),
-    finishedAt,
-    totalTimeMs,
-    totalSteps: workflow.steps.length,
-    successSteps: stepLogs.filter((s) => s.status === 'success').length,
-    failedSteps: stepLogs.filter((s) => s.status === 'failed' || s.status === 'error').length,
-    overallStatus,
-    steps: stepLogs,
-  };
-
-  // Automatically persist browser-direct execution report to MongoDB
+  // Automatically save run report locally or to MongoDB
   try {
-    await saveWorkflowRunReport(workflow._id, {
-      summary: resSummary,
-      stepLogs,
-      triggerSource: 'browser_direct',
-      githubRepo: workflow.githubRepo,
-      githubBranch: workflow.githubBranch,
-    });
+    if (workflow._id.startsWith('local-flow-') || (typeof window !== 'undefined' && !localStorage.getItem('wakeup_auth_token'))) {
+      saveLocalRunReport(workflow._id, {
+        summary,
+        stepLogs: summary.steps,
+        triggerSource: 'browser_direct',
+      });
+    } else {
+      await saveWorkflowRunReport(workflow._id, {
+        summary,
+        stepLogs: summary.steps,
+        triggerSource: 'browser_direct',
+        githubRepo: workflow.githubRepo,
+        githubBranch: workflow.githubBranch,
+      });
+    }
   } catch (err) {
-    console.error('Failed to auto-save browser direct execution run report:', err);
+    saveLocalRunReport(workflow._id, {
+      summary,
+      stepLogs: summary.steps,
+      triggerSource: 'browser_direct',
+    });
   }
 
-  return resSummary;
+  return summary;
 }
 
 export const saveWorkflowRunReport = async (
@@ -769,13 +750,32 @@ export const saveWorkflowRunReport = async (
     githubBranch?: string;
   }
 ) => {
-  const response = await apiClient.post(`/workflows/${workflowId}/runs`, data);
-  return response.data;
+  if (workflowId.startsWith('local-flow-') || (typeof window !== 'undefined' && !localStorage.getItem('wakeup_auth_token'))) {
+    saveLocalRunReport(workflowId, data);
+    return { message: 'Run report saved locally' };
+  }
+  try {
+    const response = await apiClient.post(`/workflows/${workflowId}/runs`, data);
+    saveLocalRunReport(workflowId, data);
+    return response.data;
+  } catch (err) {
+    saveLocalRunReport(workflowId, data);
+    return { message: 'Run report saved locally (offline)' };
+  }
 };
 
 export const fetchWorkflowRunHistory = async (workflowId: string, limit = 20) => {
-  const response = await apiClient.get<{ runs: any[]; count: number }>(`/workflows/${workflowId}/runs?limit=${limit}`);
-  return response.data;
+  if (workflowId.startsWith('local-flow-') || (typeof window !== 'undefined' && !localStorage.getItem('wakeup_auth_token'))) {
+    const localRuns = getLocalRunHistory(workflowId);
+    return { runs: localRuns.slice(0, limit), count: localRuns.length };
+  }
+  try {
+    const response = await apiClient.get<{ runs: any[]; count: number }>(`/workflows/${workflowId}/runs?limit=${limit}`);
+    return response.data;
+  } catch (err) {
+    const localRuns = getLocalRunHistory(workflowId);
+    return { runs: localRuns.slice(0, limit), count: localRuns.length };
+  }
 };
 
 export const fetchWorkflowRunDetails = async (runId: string) => {

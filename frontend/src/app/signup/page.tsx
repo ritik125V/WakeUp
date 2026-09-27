@@ -62,9 +62,9 @@ export default function SignupPage() {
           <p className="text-xs text-neutral-400">Set up Email & Security PIN to access WakeUp</p>
         </div>
 
-        <div className="p-4 sm:p-6 bg-neutral-950 rounded-2xl space-y-5 shadow-2xl border-none font-sans">
+        <div className="p-4 sm:p-6 bg-[#121214] rounded-xl space-y-5 shadow-2xl border-none font-sans">
           {error && (
-            <div className="p-3 text-xs bg-rose-950/60 text-rose-300 rounded-xl flex items-center gap-2 font-medium">
+            <div className="p-3 text-xs bg-rose-950/60 text-rose-300 rounded-md flex items-center gap-2 font-medium">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
               <span>{error}</span>
             </div>
@@ -80,7 +80,7 @@ export default function SignupPage() {
                 placeholder="e.g. Alex Rivera"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-neutral-900 rounded-xl text-neutral-100 text-xs font-sans outline-none border-none focus:ring-1 focus:ring-neutral-600"
+                className="w-full px-3.5 py-2.5 bg-[#161619] rounded-md text-neutral-100 text-xs font-sans outline-none border-none focus:ring-1 focus:ring-neutral-600"
               />
             </div>
 
@@ -94,7 +94,7 @@ export default function SignupPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full px-3.5 py-2.5 bg-neutral-900 rounded-xl text-neutral-100 text-xs font-sans outline-none border-none focus:ring-1 focus:ring-neutral-600"
+                className="w-full px-3.5 py-2.5 bg-[#161619] rounded-md text-neutral-100 text-xs font-sans outline-none border-none focus:ring-1 focus:ring-neutral-600"
               />
             </div>
 
@@ -111,13 +111,13 @@ export default function SignupPage() {
             <button
               type="submit"
               disabled={loading || !email || pin.length < 4}
-              className="w-full py-2.5 min-h-[44px] bg-neutral-800 hover:bg-neutral-700 active:bg-neutral-800 text-white text-xs font-semibold uppercase rounded-xl transition-all flex items-center justify-center gap-2 border-none disabled:opacity-50 cursor-pointer shadow-md mt-4 touch-press touch-manipulation"
+              className="w-full py-2.5 min-h-[44px] bg-[#f5f0e8] hover:bg-[#e8e2d8] text-black text-xs font-bold uppercase rounded-md transition-all flex items-center justify-center gap-2 border-none disabled:opacity-50 cursor-pointer shadow-sm mt-4 touch-press touch-manipulation"
             >
               {loading ? (
                 <span className="text-xs">Creating Account...</span>
               ) : (
                 <>
-                  <span>Create Account</span> <ArrowRight className="w-4 h-4 text-white" />
+                  <span>Create Account</span> <ArrowRight className="w-4 h-4 text-black" />
                 </>
               )}
             </button>

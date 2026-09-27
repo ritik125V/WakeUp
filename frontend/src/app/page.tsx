@@ -141,32 +141,32 @@ export default function Home() {
 
           <button
             onClick={() => (isLoggedIn ? setIsRegisterOpen(true) : router.push('/login'))}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] bg-neutral-800 hover:bg-neutral-700 active:bg-neutral-800 text-white font-semibold text-xs rounded-xl transition-all border-none cursor-pointer self-start sm:self-auto shadow-md touch-press"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] bg-[#f5f0e8] hover:bg-[#e8e2d8] text-black font-bold text-xs rounded-md transition-all border-none cursor-pointer self-start sm:self-auto shadow-sm touch-press"
           >
-            <Plus className="w-4 h-4 text-white" />
+            <Plus className="w-4 h-4 text-black" />
             <span>{isLoggedIn ? 'Register Endpoint' : 'Log in to Register Endpoint'}</span>
           </button>
         </div>
 
         {/* Streamlined Stats Summary Bar */}
         <div className="grid grid-cols-2 gap-3 sm:gap-4">
-          <div className="p-3.5 sm:p-4 bg-neutral-950 rounded-2xl flex items-center justify-between shadow-md border-none touch-card">
+          <div className="p-4 sm:p-5 bg-[#121214] rounded-lg flex items-center justify-between border-none touch-card">
             <div>
-              <span className="text-[11px] sm:text-xs text-neutral-500 font-medium block">Total Endpoints</span>
-              <p className="text-lg sm:text-xl font-bold text-white mt-0.5">{totalCount}</p>
+              <span className="text-[11px] sm:text-xs text-neutral-400 font-semibold uppercase tracking-wider block">Total Endpoints</span>
+              <p className="text-xl sm:text-2xl font-extrabold text-[#f5f0e8] mt-1">{totalCount}</p>
             </div>
-            <div className="p-2 sm:p-2.5 bg-neutral-900 rounded-xl text-neutral-400">
-              <Globe className="w-4 h-4 text-neutral-400" />
+            <div className="p-2.5 sm:p-3 bg-[#1a1a1e] rounded-md text-neutral-300">
+              <Globe className="w-5 h-5 text-neutral-300" />
             </div>
           </div>
 
-          <div className="p-3.5 sm:p-4 bg-neutral-950 rounded-2xl flex items-center justify-between shadow-md border-none touch-card">
+          <div className="p-4 sm:p-5 bg-[#121214] rounded-lg flex items-center justify-between border-none touch-card">
             <div>
-              <span className="text-[11px] sm:text-xs text-neutral-500 font-medium block">Healthy Services</span>
-              <p className="text-lg sm:text-xl font-bold text-emerald-400 mt-0.5">{healthyCount}</p>
+              <span className="text-[11px] sm:text-xs text-neutral-400 font-semibold uppercase tracking-wider block">Healthy Services</span>
+              <p className="text-xl sm:text-2xl font-extrabold text-emerald-400 mt-1">{healthyCount}</p>
             </div>
-            <div className="p-2 sm:p-2.5 bg-neutral-900 rounded-xl text-neutral-300">
-              <ShieldCheck className="w-4 h-4 text-neutral-300" />
+            <div className="p-2.5 sm:p-3 bg-[#1a1a1e] rounded-md text-emerald-400">
+              <ShieldCheck className="w-5 h-5 text-emerald-400" />
             </div>
           </div>
         </div>
@@ -174,26 +174,26 @@ export default function Home() {
         {/* Monitored Backend Services */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+            <h2 className="text-sm sm:text-base font-extrabold text-[#f5f0e8] uppercase tracking-wider flex items-center gap-2">
               <Server className="w-4 h-4 text-neutral-400" /> Monitored Services
             </h2>
             <button
               onClick={handleRefresh}
               disabled={refreshing}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-neutral-400 hover:text-white bg-neutral-950 hover:bg-neutral-900 transition-colors rounded-lg border-none cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-neutral-400 hover:text-white bg-[#1a1a1e] hover:bg-[#242429] transition-colors rounded-md border-none cursor-pointer touch-press"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-rose-400' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-neutral-200' : ''}`} />
               <span>Refresh</span>
             </button>
           </div>
 
           {loading ? (
-            <div className="p-16 text-center text-neutral-500 text-xs flex items-center justify-center gap-2 bg-neutral-950 rounded-2xl">
-              <Activity className="w-4 h-4 animate-spin text-rose-400" />
+            <div className="p-16 text-center text-neutral-500 text-xs flex items-center justify-center gap-2 bg-[#121214] rounded-lg">
+              <Activity className="w-4 h-4 animate-spin text-neutral-300" />
               <span>Loading endpoints...</span>
             </div>
           ) : Object.keys(groupedData).length === 0 ? (
-            <div className="p-16 bg-neutral-950 rounded-2xl text-center space-y-3">
+            <div className="p-16 bg-[#121214] rounded-lg text-center space-y-3">
               <Globe className="w-8 h-8 text-neutral-600 mx-auto" />
               <h3 className="text-sm font-semibold text-white">
                 {isLoggedIn ? 'No endpoints registered' : 'Log in to register an endpoint'}
@@ -205,9 +205,9 @@ export default function Home() {
               </p>
               <button
                 onClick={() => (isLoggedIn ? setIsRegisterOpen(true) : router.push('/login'))}
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-medium rounded-lg border-none transition-colors"
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#f5f0e8] hover:bg-[#e8e2d8] text-black text-xs font-bold rounded-md border-none transition-colors shadow-sm touch-press"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-4 h-4 text-black" />
                 <span>{isLoggedIn ? 'Register Endpoint' : 'Log in to Register Endpoint'}</span>
               </button>
             </div>
@@ -216,12 +216,12 @@ export default function Home() {
               {Object.entries(groupedData).map(([projectName, endpoints]) => (
                 <div
                   key={projectName}
-                  className="p-5 bg-neutral-950 rounded-2xl space-y-4 border-none shadow-md"
+                  className="p-5 bg-[#121214] rounded-lg space-y-4 border-none"
                 >
                   {/* Group Header */}
                   <div className="flex items-center justify-between pb-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-white bg-neutral-900 px-2.5 py-1 rounded-lg">
+                      <span className="text-xs font-bold text-white bg-[#1a1a1e] px-2.5 py-1 rounded-md">
                         {projectName}
                       </span>
                       <span className="text-xs text-neutral-500 font-mono">
@@ -230,7 +230,7 @@ export default function Home() {
                     </div>
 
                     <span
-                      className={`px-2.5 py-1 text-[11px] font-medium rounded-lg ${
+                      className={`px-2.5 py-1 text-[11px] font-medium rounded-md ${
                         endpoints.every((e) => e.status === 'healthy' || e.status === 'pending')
                           ? 'bg-emerald-950/60 text-emerald-400'
                           : endpoints.some((e) => e.status === 'degraded')
@@ -254,15 +254,15 @@ export default function Home() {
                         <div
                           key={ep._id}
                           onClick={() => router.push(`/endpoint/${ep._id}`)}
-                          className="p-4 bg-neutral-900/60 hover:bg-neutral-900 rounded-xl space-y-3 cursor-pointer transition-colors group border-none"
+                          className="p-4 bg-[#1a1a1e] hover:bg-[#242429] rounded-lg space-y-3 cursor-pointer transition-colors group border-none touch-card"
                         >
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-xs font-semibold text-neutral-200 group-hover:text-rose-300 transition-colors truncate">
+                              <span className="text-xs font-semibold text-neutral-200 group-hover:text-white transition-colors truncate">
                                 {ep.url}
                               </span>
                               <ExternalLink className="w-3 h-3 text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                              <span className="text-[10px] font-mono px-1.5 py-0.5 bg-neutral-950 text-neutral-400 rounded-md shrink-0">
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 bg-[#121214] text-neutral-400 rounded-md shrink-0">
                                 {ep.method}
                               </span>
                             </div>
@@ -277,7 +277,7 @@ export default function Home() {
                               <button
                                 onClick={(e) => handleDeleteEndpoint(ep._id, e)}
                                 title="Delete endpoint"
-                                className="p-1 text-neutral-500 hover:text-rose-400 hover:bg-neutral-950 rounded-md transition-colors border-none opacity-0 group-hover:opacity-100 cursor-pointer"
+                                className="p-1 text-neutral-500 hover:text-rose-400 hover:bg-[#121214] rounded-md transition-colors border-none opacity-0 group-hover:opacity-100 cursor-pointer"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
@@ -289,7 +289,7 @@ export default function Home() {
 
                           {/* Incident Previews */}
                           {epIncidents.length > 0 && (
-                            <div className="pt-2 border-t border-neutral-850/60 space-y-1.5">
+                            <div className="pt-2 border-t border-neutral-900 space-y-1.5">
                               <span className="text-[10px] text-neutral-500 uppercase font-mono font-medium block">Recent Incidents:</span>
                               <div className="space-y-1">
                                 {epIncidents.slice(0, 2).map((inc) => (
@@ -299,10 +299,10 @@ export default function Home() {
                                       e.stopPropagation();
                                       setSelectedIncident(inc);
                                     }}
-                                    className="p-2 bg-neutral-950 hover:bg-neutral-900 rounded-lg flex items-center justify-between text-xs transition-colors"
+                                    className="p-2 bg-[#121214] hover:bg-[#242429] rounded-md flex items-center justify-between text-xs transition-colors"
                                   >
                                     <div className="flex items-center gap-2 min-w-0">
-                                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${inc.resolved ? 'bg-amber-400' : 'bg-rose-500 animate-pulse'}`} />
+                                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${inc.resolved ? 'bg-amber-400' : 'bg-rose-500'}`} />
                                       <span className="text-neutral-300 font-medium truncate">{inc.errorMessage}</span>
                                     </div>
                                     <span className="text-neutral-500 text-[11px] font-mono flex items-center gap-1 shrink-0">

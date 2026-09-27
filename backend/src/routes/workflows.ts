@@ -611,11 +611,8 @@ router.post('/github-webhook', async (req: Request, res: Response) => {
   }
 });
 
-// Protect all remaining routes with JWT Auth
-router.use(authenticateToken as any);
-
 /**
- * Test a single API step in isolation
+ * Test a single API step in isolation (Terminal / Postman / cURL style execution with zero CORS issues)
  */
 router.post('/test-step', async (req: AuthRequest, res: Response) => {
   try {
@@ -631,6 +628,9 @@ router.post('/test-step', async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to execute single step test' });
   }
 });
+
+// Protect all remaining routes with JWT Auth
+router.use(authenticateToken as any);
 
 /**
  * Get all workflows for current user
@@ -663,7 +663,7 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
 });
 
 /**
- * Create a new workflow
+ * Create or Update workflow (Enforces unique title constraint per user account)
  */
 router.post('/', async (req: AuthRequest, res: Response) => {
   try {
@@ -672,6 +672,26 @@ router.post('/', async (req: AuthRequest, res: Response) => {
 
     if (!name || typeof name !== 'string') {
       return res.status(400).json({ error: 'Workflow name is required' });
+    }
+
+    const cleanName = name.trim();
+
+    // Enforce unique workflow title constraint per user account
+    const existing = await WorkflowModel.findOne({
+      userId,
+      name: { $regex: new RegExp(`^${cleanName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') },
+    });
+
+    if (existing) {
+      if (description !== undefined) existing.description = description;
+      if (steps !== undefined) existing.steps = steps;
+      if (githubEnabled !== undefined) existing.githubEnabled = Boolean(githubEnabled);
+      if (githubRepo !== undefined) existing.githubRepo = githubRepo.trim();
+      if (githubBranch !== undefined) existing.githubBranch = githubBranch.trim();
+      if (notificationEmail !== undefined) existing.notificationEmail = notificationEmail.trim();
+
+      await existing.save();
+      return res.status(200).json({ message: 'Workflow updated successfully', workflow: existing });
     }
 
     const defaultSteps = steps || [
@@ -692,7 +712,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
 
     const workflow = await WorkflowModel.create({
       userId,
-      name: name.trim(),
+      name: cleanName,
       description: description || '',
       steps: defaultSteps,
       githubEnabled: Boolean(githubEnabled),

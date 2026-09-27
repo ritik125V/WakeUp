@@ -187,20 +187,18 @@ export default function EndpointDetailPage({ params }: { params: Promise<{ id: s
             <span>New Data • Reload</span>
           </motion.div>
         )}
-      </AnimatePresence>
-
-      <div className="w-full max-w-4xl space-y-5 my-4">
+      </AnimatePresence>      <div className="w-full max-w-4xl space-y-6 sm:space-y-8 my-4">
         {/* Navigation Bar */}
         <div className="flex items-center justify-between border-b border-neutral-900 pb-3.5">
           <div className="flex items-center gap-3">
             <Link
               href="/"
-              className="inline-flex items-center gap-2 text-xs text-neutral-400 hover:text-white transition-colors"
+              className="inline-flex items-center gap-2 text-xs text-neutral-400 hover:text-white transition-colors touch-press"
             >
-              <ArrowLeft className="w-4 h-4 text-rose-300" /> Back to Dashboard
+              <ArrowLeft className="w-4 h-4 text-neutral-300" /> Back to Dashboard
             </Link>
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-neutral-900 text-[11px] font-mono text-rose-300 rounded-md">
-              <Activity className="w-3.5 h-3.5 text-rose-300" />
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-neutral-900 text-[11px] font-mono text-neutral-300 rounded-md">
+              <Activity className="w-3.5 h-3.5 text-neutral-300" />
               ENDPOINT MONITOR
             </div>
           </div>
@@ -221,19 +219,19 @@ export default function EndpointDetailPage({ params }: { params: Promise<{ id: s
         </div>
 
         {/* Header Summary Card (No Borders) */}
-        <div className="p-5 bg-neutral-950 rounded-lg space-y-3.5 border-none">
+        <div className="p-5 sm:p-6 bg-[#121214] rounded-lg space-y-4 border-none">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <span className="text-xs text-rose-300 font-bold bg-neutral-900 px-2.5 py-0.5 rounded-md uppercase">
+              <span className="text-xs text-white font-bold bg-[#1a1a1e] px-2.5 py-0.5 rounded-md uppercase">
                 {endpoint.projectName}
               </span>
-              <h1 className="text-lg font-bold text-white mt-1 break-all">{endpoint.url}</h1>
+              <h1 className="text-xl sm:text-2xl font-extrabold text-[#f5f0e8] mt-1.5 break-all">{endpoint.url}</h1>
             </div>
 
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setIsEditOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-850 text-neutral-200 text-xs font-bold rounded-md transition-all border-none"
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-[#1a1a1e] hover:bg-[#242429] text-neutral-200 text-xs font-bold rounded-md transition-all border-none touch-press cursor-pointer"
               >
                 <Settings className="w-3.5 h-3.5 text-neutral-400" /> Edit Config
               </button>
@@ -241,16 +239,16 @@ export default function EndpointDetailPage({ params }: { params: Promise<{ id: s
               <button
                 onClick={handleLiveBrowserCheck}
                 disabled={liveTesting}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-850 text-rose-300 text-xs font-bold rounded-md transition-all disabled:opacity-50 border-none"
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-[#f5f0e8] hover:bg-[#e8e2d8] text-black text-xs font-bold rounded-md transition-all disabled:opacity-50 border-none touch-press shadow-sm cursor-pointer"
               >
-                <Zap className="w-3.5 h-3.5 text-rose-300" />
+                <Zap className="w-3.5 h-3.5 text-black" />
                 {liveTesting ? 'Testing Browser API...' : 'Test API (Browser)'}
               </button>
             </div>
           </div>
 
           {/* Compact Inline NextCheckCountdown */}
-          <div className="pt-2 flex items-center justify-between border-t border-neutral-900">
+          <div className="pt-3 flex items-center justify-between border-t border-neutral-900">
             <NextCheckCountdown
               lastCheckedAt={endpoint.lastCheckedAt}
               checkIntervalMinutes={endpoint.checkIntervalMinutes}
@@ -260,33 +258,32 @@ export default function EndpointDetailPage({ params }: { params: Promise<{ id: s
             <div className="flex items-center gap-3 text-xs text-neutral-400 font-mono">
               <span>Expected Code: <strong className="text-white">HTTP {endpoint.expectedStatusCode}</strong></span>
               {endpoint.lastResponseTimeMs && (
-                <span>Latency: <strong className="text-rose-300">{endpoint.lastResponseTimeMs}ms</strong></span>
+                <span>Latency: <strong className="text-neutral-200">{endpoint.lastResponseTimeMs}ms</strong></span>
               )}
             </div>
           </div>
         </div>
 
         {/* 30-Day Health Grid */}
-        <div className="p-5 bg-neutral-950 rounded-lg space-y-3 border-none">
+        <div className="p-5 sm:p-6 bg-[#121214] rounded-lg space-y-3 border-none">
           <IncidentTimeline incidents={incidents} endpointStatus={endpoint.status} />
         </div>
 
         {/* Incidents Log Table */}
-        <div className="p-5 bg-neutral-950 rounded-lg space-y-3.5 border-none">
-          <div className="flex items-center justify-between border-b border-neutral-900 pb-2.5">
-            <h2 className="text-xs font-bold uppercase text-white flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-rose-300" /> INCIDENT LOGS ({incidents.length})
+        <div className="p-5 sm:p-6 bg-[#121214] rounded-lg space-y-4 border-none">
+          <div className="flex items-center justify-between border-b border-neutral-900 pb-3">
+            <h2 className="text-sm font-extrabold uppercase text-[#f5f0e8] tracking-wider flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-400" /> INCIDENT LOGS ({incidents.length})
             </h2>
 
             <button
               onClick={handleDelete}
-              className="flex items-center gap-1 px-2.5 py-1 bg-neutral-900 hover:bg-rose-950 text-neutral-400 hover:text-rose-300 text-[11px] rounded-md transition-all border-none"
+              className="flex items-center gap-1 px-3 py-1.5 bg-[#1a1a1e] hover:bg-rose-950/60 text-neutral-400 hover:text-rose-300 text-xs rounded-md transition-all border-none touch-press cursor-pointer"
             >
-              <Trash2 className="w-3 h-3" /> Delete Endpoint
+              <Trash2 className="w-3.5 h-3.5" /> Delete Endpoint
             </button>
           </div>
 
-          {/* Render Expandable Incident Accordions */}
           <IncidentAccordion incidents={incidents} />
         </div>
       </div>

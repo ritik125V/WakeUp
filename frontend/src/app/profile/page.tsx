@@ -46,6 +46,12 @@ import {
 } from '@/lib/api';
 import { openGithubAppInstallPopup } from '@/lib/githubPopup';
 import { DynamicPinInput } from '@/components/DynamicPinInput';
+import {
+  isCloudSyncEnabled,
+  setCloudSyncEnabled,
+  getUnsyncedLocalWorkflows,
+  syncLocalWorkflowsToCloud,
+} from '@/lib/workflowLocalStorage';
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -83,6 +89,46 @@ export default function ProfilePage() {
   const [repoFilter, setRepoFilter] = useState('');
   const [showGithubSettingsModal, setShowGithubSettingsModal] = useState(false);
   const [showAccountSettingsModal, setShowAccountSettingsModal] = useState(false);
+
+  // Cloud Synchronization State
+  const [cloudSyncEnabled, setCloudSyncEnabledState] = useState<boolean>(false);
+  const [unsyncedCount, setUnsyncedCount] = useState<number>(0);
+  const [isSyncingLocal, setIsSyncingLocal] = useState<boolean>(false);
+  const [syncMsg, setSyncMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    setCloudSyncEnabledState(isCloudSyncEnabled());
+    const unsynced = getUnsyncedLocalWorkflows();
+    setUnsyncedCount(unsynced.length);
+  }, []);
+
+  const handleToggleCloudSync = (enabled: boolean) => {
+    setCloudSyncEnabled(enabled);
+    setCloudSyncEnabledState(enabled);
+    if (enabled) {
+      setSyncMsg({ type: 'success', text: 'Cloud Synchronization enabled.' });
+    } else {
+      setSyncMsg({ type: 'success', text: 'Cloud Synchronization disabled. Local workflows remain in local storage.' });
+    }
+    setTimeout(() => setSyncMsg(null), 4000);
+  };
+
+  const handleManualSequentialSync = async () => {
+    try {
+      setIsSyncingLocal(true);
+      const synced = await syncLocalWorkflowsToCloud((syncing) => {
+        setIsSyncingLocal(syncing);
+      }, true);
+      const remaining = getUnsyncedLocalWorkflows();
+      setUnsyncedCount(remaining.length);
+      setSyncMsg({ type: 'success', text: `Successfully synchronized ${synced} workflow(s) to cloud database sequentially.` });
+      setTimeout(() => setSyncMsg(null), 5000);
+    } catch (err) {
+      setSyncMsg({ type: 'error', text: 'Failed to synchronize workflows to database.' });
+    } finally {
+      setIsSyncingLocal(false);
+    }
+  };
 
   const loadConnectedRepos = async (username?: string) => {
     try {
@@ -451,12 +497,12 @@ export default function ProfilePage() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Enter display name"
-                    className="w-full px-3.5 py-2 bg-black border-none rounded-xl text-white text-xs outline-none"
+                    className="w-full px-3.5 py-2 bg-[#161619] border-none rounded-md text-white text-xs outline-none"
                   />
                   <button
                     type="submit"
                     disabled={savingProfile}
-                    className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition-all border-none cursor-pointer disabled:opacity-50 flex items-center gap-2"
+                    className="px-4 py-2 bg-[#f5f0e8] hover:bg-[#e8e2d8] text-black text-xs font-bold rounded-md transition-all border-none cursor-pointer disabled:opacity-50 flex items-center gap-2 touch-press"
                   >
                     {savingProfile ? (
                       <>
@@ -464,7 +510,7 @@ export default function ProfilePage() {
                       </>
                     ) : (
                       <>
-                        <Save className="w-3.5 h-3.5" /> Save Display Name
+                        <Save className="w-3.5 h-3.5 text-black" /> Save Display Name
                       </>
                     )}
                   </button>
@@ -484,7 +530,7 @@ export default function ProfilePage() {
 
                 {pinMsg && (
                   <div
-                    className={`p-3 text-xs rounded-xl flex items-center gap-2 ${
+                    className={`p-3 text-xs rounded-md flex items-center gap-2 ${
                       pinMsg.type === 'success'
                         ? 'bg-emerald-950/80 text-emerald-300'
                         : 'bg-rose-950/80 text-rose-300'
@@ -527,7 +573,7 @@ export default function ProfilePage() {
                   <button
                     type="submit"
                     disabled={changingPin || !newPin || newPin.length < 4 || newPin !== confirmPin}
-                    className="w-full py-2 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold rounded-xl transition-all border-none cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 mt-4"
+                    className="w-full py-2 bg-[#f5f0e8] hover:bg-[#e8e2d8] text-black text-xs font-bold rounded-md transition-all border-none cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 mt-4 touch-press"
                   >
                     {changingPin ? (
                       <>
@@ -535,7 +581,7 @@ export default function ProfilePage() {
                       </>
                     ) : (
                       <>
-                        <KeyRound className="w-3.5 h-3.5" /> Update Security PIN
+                        <KeyRound className="w-3.5 h-3.5 text-black" /> Update Security PIN
                       </>
                     )}
                   </button>
@@ -546,11 +592,89 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* Global GitHub App Integration Card */}
-        <div className="p-6 bg-neutral-950 rounded-2xl space-y-4 border-none shadow-md font-sans">
+        {/* Cloud Synchronization Settings Card */}
+        <div className="p-6 bg-[#121214] rounded-lg space-y-4 border-none shadow-md font-sans">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="space-y-0.5">
-              <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2 font-sans">
+              <h2 className="text-sm font-bold text-[#f5f0e8] uppercase tracking-wider flex items-center gap-2 font-sans">
+                <Server className="w-4 h-4 text-sky-400" /> Cloud Workflow Synchronization
+              </h2>
+              <p className="text-xs text-neutral-400 font-sans">
+                Controls whether local guest workflows synchronize automatically with your MongoDB cloud database when logged in.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className={`text-xs font-bold ${cloudSyncEnabled ? 'text-emerald-400' : 'text-neutral-500'}`}>
+                {cloudSyncEnabled ? 'Synchronization Enabled' : 'Disabled'}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleToggleCloudSync(!cloudSyncEnabled)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer border-none ${
+                  cloudSyncEnabled ? 'bg-emerald-600' : 'bg-neutral-800'
+                }`}
+                title="Enable or disable cloud workflow database synchronization"
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    cloudSyncEnabled ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {unsyncedCount > 0 && (
+            <div className="p-3.5 bg-[#18181c] rounded-xl flex items-center justify-between gap-3 flex-wrap border-none text-xs">
+              <div className="flex items-center gap-2 text-amber-300 font-medium">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>You have <strong>{unsyncedCount}</strong> unsynchronized local workflow(s).</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleManualSequentialSync}
+                disabled={isSyncingLocal}
+                className="px-3 py-1.5 bg-[#f5f0e8] hover:bg-[#e8e2d8] text-black font-bold text-xs rounded-lg border-none cursor-pointer flex items-center gap-1.5 transition-all shadow-sm"
+              >
+                {isSyncingLocal ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-black" />
+                    <span>Syncing Sequentially...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5 fill-current text-black" />
+                    <span>Sync Workflows Now (Sequential)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
+          {syncMsg && (
+            <div
+              className={`p-3 text-xs rounded-xl flex items-center gap-2 font-sans ${
+                syncMsg.type === 'success'
+                  ? 'bg-emerald-950/80 text-emerald-300'
+                  : 'bg-rose-950/80 text-rose-300'
+              }`}
+            >
+              {syncMsg.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+              )}
+              <span>{syncMsg.text}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Global GitHub App Integration Card */}
+        <div className="p-6 bg-[#121214] rounded-lg space-y-4 border-none shadow-md font-sans">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="space-y-0.5">
+              <h2 className="text-sm font-bold text-[#f5f0e8] uppercase tracking-wider flex items-center gap-2 font-sans">
                 <GitBranch className="w-4 h-4 text-neutral-400" /> GitHub Integration
               </h2>
               <p className="text-xs text-neutral-400 font-sans">
@@ -560,14 +684,14 @@ export default function ProfilePage() {
 
             {githubStatus?.githubAppConnected ? (
               <div className="flex items-center gap-2 font-sans">
-                <div className="px-3.5 py-1.5 bg-neutral-900 text-emerald-300 text-xs font-semibold rounded-xl font-sans flex items-center gap-2 border-none">
+                <div className="px-3.5 py-1.5 bg-[#1a1a1e] text-emerald-300 text-xs font-semibold rounded-md font-sans flex items-center gap-2 border-none">
                   <Check className="w-3.5 h-3.5 text-emerald-400" />
                   <span>@{githubStatus.githubUsername || 'ritik125V'}</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowGithubSettingsModal(true)}
-                  className="p-2 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white rounded-xl border-none cursor-pointer transition-colors flex items-center justify-center"
+                  className="p-2 bg-[#1a1a1e] hover:bg-[#242429] text-neutral-300 hover:text-white rounded-md border-none cursor-pointer transition-colors flex items-center justify-center touch-press"
                   title="GitHub Integration Settings"
                 >
                   <Settings className="w-4 h-4 text-neutral-400" />
@@ -577,9 +701,9 @@ export default function ProfilePage() {
               <button
                 type="button"
                 onClick={handleConnectGithubPopup}
-                className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white font-semibold text-xs rounded-xl border-none cursor-pointer flex items-center gap-2 transition-all shadow-sm font-sans"
+                className="px-4 py-2 bg-[#f5f0e8] hover:bg-[#e8e2d8] text-black font-bold text-xs rounded-md border-none cursor-pointer flex items-center gap-2 transition-all shadow-sm font-sans touch-press"
               >
-                <Sparkles className="w-3.5 h-3.5 text-white" />
+                <Sparkles className="w-3.5 h-3.5 text-black" />
                 <span>Connect GitHub Account</span>
               </button>
             )}

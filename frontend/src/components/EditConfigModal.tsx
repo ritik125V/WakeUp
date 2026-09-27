@@ -64,7 +64,7 @@ export function EditConfigModal({ isOpen, endpoint, onClose, onSaveSuccess }: Ed
           initial={{ opacity: 0, scale: 0.96 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.96 }}
-          className="w-full max-w-lg p-6 bg-neutral-950 border-none rounded-2xl space-y-5 relative text-neutral-100 shadow-2xl"
+          className="w-full max-w-lg p-6 bg-[#121214] border-none rounded-xl space-y-5 relative text-neutral-100 shadow-2xl"
         >
           <button
             onClick={onClose}
@@ -74,17 +74,17 @@ export function EditConfigModal({ isOpen, endpoint, onClose, onSaveSuccess }: Ed
           </button>
 
           <div className="flex items-center gap-3 border-b border-neutral-900 pb-3.5">
-            <div className="w-9 h-9 bg-rose-950/60 text-rose-400 rounded-xl flex items-center justify-center font-bold">
+            <div className="w-9 h-9 bg-[#1a1a1e] text-neutral-300 rounded-md flex items-center justify-center font-bold">
               <Server className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-xs font-bold uppercase tracking-wider text-white">EDIT ENDPOINT CONFIGURATION</h2>
+              <h2 className="text-xs font-bold uppercase tracking-wider text-[#f5f0e8]">EDIT ENDPOINT CONFIGURATION</h2>
               <p className="text-[11px] text-neutral-400">Modify URL, check frequency, or expected HTTP status code</p>
             </div>
           </div>
 
           {error && (
-            <div className="p-3 text-xs bg-rose-950/60 text-rose-300 rounded-xl font-bold border-none">
+            <div className="p-3 text-xs bg-rose-950/60 text-rose-300 rounded-md font-bold border-none">
               ❌ {error}
             </div>
           )}
@@ -97,7 +97,7 @@ export function EditConfigModal({ isOpen, endpoint, onClose, onSaveSuccess }: Ed
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 required
-                className="w-full px-3.5 py-2.5 bg-black border-none rounded-xl text-xs font-mono text-neutral-100 outline-none"
+                className="w-full px-3.5 py-2.5 bg-[#161619] border-none rounded-md text-xs font-mono text-neutral-100 outline-none"
               />
             </div>
 
@@ -108,19 +108,19 @@ export function EditConfigModal({ isOpen, endpoint, onClose, onSaveSuccess }: Ed
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
                 required
-                className="w-full px-3.5 py-2.5 bg-black border-none rounded-xl text-xs font-mono text-neutral-100 outline-none uppercase"
+                className="w-full px-3.5 py-2.5 bg-[#161619] border-none rounded-md text-xs font-mono text-neutral-100 outline-none uppercase"
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="text-[10px] text-neutral-400 font-bold uppercase flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-rose-400" /> CHECK FREQUENCY
+                  <Clock className="w-3.5 h-3.5 text-neutral-400" /> CHECK FREQUENCY
                 </label>
                 <select
                   value={checkInterval}
                   onChange={(e) => setCheckInterval(Number(e.target.value))}
-                  className="w-full px-3 py-2.5 bg-black border-none rounded-xl text-xs font-mono text-neutral-100 outline-none cursor-pointer"
+                  className="w-full px-3 py-2.5 bg-[#161619] border-none rounded-md text-xs font-mono text-neutral-100 outline-none cursor-pointer"
                 >
                   <option value={5}>Every 5 Minutes</option>
                   <option value={10}>Every 10 Minutes</option>
@@ -136,7 +136,7 @@ export function EditConfigModal({ isOpen, endpoint, onClose, onSaveSuccess }: Ed
                   value={expectedStatus}
                   onChange={(e) => setExpectedStatus(Number(e.target.value))}
                   required
-                  className="w-full px-3.5 py-2.5 bg-black border-none rounded-xl text-xs font-mono text-neutral-100 outline-none"
+                  className="w-full px-3.5 py-2.5 bg-[#161619] border-none rounded-md text-xs font-mono text-neutral-100 outline-none"
                 />
               </div>
             </div>
@@ -145,16 +145,16 @@ export function EditConfigModal({ isOpen, endpoint, onClose, onSaveSuccess }: Ed
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 text-xs font-bold rounded-xl border-none cursor-pointer"
+                className="px-4 py-2 bg-[#1a1a1e] hover:bg-[#242429] text-neutral-300 text-xs font-bold rounded-md border-none cursor-pointer touch-press"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={saving}
-                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-2 border-none cursor-pointer shadow-md disabled:opacity-50"
+                className="px-5 py-2 bg-[#f5f0e8] hover:bg-[#e8e2d8] text-black text-xs font-bold rounded-md transition-all flex items-center gap-2 border-none cursor-pointer shadow-sm disabled:opacity-50 touch-press"
               >
-                <Save className="w-4 h-4" />
+                <Save className="w-4 h-4 text-black" />
                 {saving ? 'Saving...' : 'Save & Close'}
               </button>
             </div>
